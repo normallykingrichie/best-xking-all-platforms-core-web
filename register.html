@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Join XKing</title>
+<script>try{var t=localStorage.getItem('xk1.theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,700;6..96,800&family=Manrope:wght@500;600;700;800&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}</style>
+</head>
+<body>
+<div class="wrap auth-page">
+  <canvas id="skyline" class="auth-sky" aria-hidden="true"></canvas>
+  <div class="auth-top">
+    <a class="brand" href="index.html"><span class="gold">XKing</span><small>Official Public</small></a>
+    <div id="themeHost"></div>
+  </div>
+  <main class="auth-card">
+    <div>
+      <p class="eyebrow">Save your progress</p>
+      <h1 class="display">Create your account</h1>
+    </div>
+    <form id="authForm" class="form-stack" novalidate>
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" type="text" autocomplete="username" maxlength="20" required>
+        <p class="hint">3 to 20 characters: letters, numbers, dot, dash or underscore.</p>
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="email" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="input-wrap">
+          <input id="password" type="password" autocomplete="new-password" required>
+          <button type="button" data-reveal="password" aria-pressed="false">Show</button>
+        </div>
+        <div class="meter" aria-hidden="true"><i id="meterBar"></i></div>
+        <p class="hint" id="meterLabel">Use 8+ characters. Mix letters, numbers and symbols.</p>
+      </div>
+      <div class="field">
+        <label for="confirm">Confirm password</label>
+        <input id="confirm" type="password" autocomplete="new-password" required>
+      </div>
+      <p class="form-error" id="authErr" role="alert" hidden></p>
+      <button type="submit" id="authSubmit" class="btn-primary">Sign up</button>
+    </form>
+    <div class="divider"><span>or sign up with</span></div>
+    <div class="provider-row">
+      <button type="button" class="btn-ghost" data-provider="google">Google</button>
+      <button type="button" class="btn-ghost" data-provider="discord">Discord</button>
+    </div>
+    <p class="auth-switch">Already have an account? <a href="login.html">Sign in</a></p>
+    <p class="auth-switch"><a href="index.html">Back to the public page</a></p>
+  </main>
+</div>
+<script src="app.js"></script>
+<script>XK.boot(); XK.initAuth('register');</script>
+</body>
+</html>

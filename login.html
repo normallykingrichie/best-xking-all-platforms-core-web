@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in to XKing</title>
+<script>try{var t=localStorage.getItem('xk1.theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,700;6..96,800&family=Manrope:wght@500;600;700;800&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}</style>
+</head>
+<body>
+<div class="wrap auth-page">
+  <canvas id="skyline" class="auth-sky" aria-hidden="true"></canvas>
+  <div class="auth-top">
+    <a class="brand" href="index.html"><span class="gold">XKing</span><small>Official Public</small></a>
+    <div id="themeHost"></div>
+  </div>
+  <main class="auth-card">
+    <div>
+      <p class="eyebrow">Welcome back</p>
+      <h1 class="display">Sign in</h1>
+    </div>
+    <form id="authForm" class="form-stack" novalidate>
+      <div class="field">
+        <label for="identifier">Email or username</label>
+        <input id="identifier" type="text" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="input-wrap">
+          <input id="password" type="password" autocomplete="current-password" required>
+          <button type="button" data-reveal="password" aria-pressed="false">Show</button>
+        </div>
+      </div>
+      <p class="form-error" id="authErr" role="alert" hidden></p>
+      <button type="submit" id="authSubmit" class="btn-primary">Sign in</button>
+    </form>
+    <div class="divider"><span>or continue with</span></div>
+    <div class="provider-row">
+      <button type="button" class="btn-ghost" data-provider="google">Google</button>
+      <button type="button" class="btn-ghost" data-provider="discord">Discord</button>
+    </div>
+    <p class="auth-switch">New here? <a href="register.html">Create an account</a></p>
+    <p class="auth-switch"><a href="index.html">Back to the public page</a></p>
+  </main>
+</div>
+<script src="app.js"></script>
+<script>XK.boot(); XK.initAuth('login');</script>
+</body>
+</html>
