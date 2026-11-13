@@ -491,3 +491,9 @@ input[type="range"] { width: 100%; accent-color: var(--gold-fill); }
 .auth-top .brand small { color: var(--fg); opacity: .75; }
 .auth-page { padding-bottom: 96px; }
 .provider-row { grid-template-columns: 1fr; }
+
+/* Header: tabs always get their own full row and wrap, so none are ever hidden or need sideways scrolling. */
+.topbar { flex-wrap: wrap; }
+.nav { order: 3; flex: 1 1 100%; flex-wrap: wrap; overflow: visible; min-width: 0; padding: 4px 0 0; }
+.tab { flex: 0 0 auto; }
+body { padding-bottom: 84px; }
