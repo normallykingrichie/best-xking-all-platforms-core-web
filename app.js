@@ -1,21 +1,17 @@
 /* XKing Core - shared logic for index.html, login.html and register.html.
-   Preview build: every account, coin, post and quiz is saved in this browser's localStorage only.
-   Before going public, replace the "Data layer" section with calls to a real backend. */
+   Connected build: accounts, Coins, posts and quizzes live in your Supabase project.
+   The browser only holds the public (publishable) key. Balances and admin actions go through
+   server-side functions that check who is asking, so nothing here can be used to cheat. */
 (function () {
   'use strict';
 
+  var C = window.XK_CONFIG || {};
   var CONFIG = {
-    linktreeUrl: 'https://claude.ai/artifact/DSbtEpBz75QjDKtX4Mrm33',
-    quizDelayMs: 20000,
+    linktreeUrl: C.linktreeUrl || 'https://xking-supremax-studios-linktree.netlify.app/',
     quizReward: 10,
-    userIterations: 100000,
-    admin: {
-      salt: 'xk-core-admin-v1-4d68d7ba4b7e81ac',
-      iterations: 150000,
-      hash: 'f97634139944fbe28db9b7cc3a19a611ddf56d782605e5f57bfda9c5abbaf8ec'
-    }
+    pollMs: 6000
   };
-  var K = { users: 'xk1.users', posts: 'xk1.posts', quiz: 'xk1.quiz', audit: 'xk1.audit', session: 'xk1.session', theme: 'xk1.theme', admin: 'xk1.admin' };
+  var K = { theme: 'xk1.theme', remember: 'xk.remember', adminMode: 'xk.adminMode' };
   var EMOJI = ['\u{1F44D}', '❤️', '\u{1F602}', '\u{1F62E}', '\u{1F622}', '\u{1F389}'];
 
   var ICON = {
@@ -23,7 +19,8 @@
     light: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.3"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/></svg>',
     dark: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 11.6A6.8 6.8 0 0 1 8.4 3.5a6.8 6.8 0 1 0 8.1 8.1z"/></svg>',
     shield: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5.5c0 4.4-2.9 8-7 9.5-4.1-1.5-7-5.1-7-9.5V6z"/><path d="M9 12l2.2 2.2L15.5 10"/></svg>',
-    person: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg>'
+    person: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg>',
+    discord: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M19.6 5.3A16.6 16.6 0 0 0 15.5 4l-.5 1.1a15.4 15.4 0 0 0-4.6 0L9.9 4a16.6 16.6 0 0 0-4.1 1.3C3.2 9.2 2.5 13 2.8 16.7a16.7 16.7 0 0 0 5 2.5l1.1-1.7a10.8 10.8 0 0 1-1.7-.8l.4-.3a11.9 11.9 0 0 0 10.1 0l.4.3c-.5.3-1.1.6-1.7.8l1.1 1.7a16.6 16.6 0 0 0 5-2.5c.4-4.3-.7-8.1-2.9-11.4zM9.4 14.5c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm5.2 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></svg>'
   };
 
   /* ---------- helpers ---------- */
@@ -37,250 +34,338 @@
   function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36); }
   function emit(n, d) { document.dispatchEvent(new CustomEvent('xk:' + n, { detail: d || {} })); }
   function on(n, f) { document.addEventListener('xk:' + n, f); }
+  var skew = 0; /* server time minus this device's time, in ms */
+  function now() { return Date.now() + skew; }
   function fmtDate(ts) { try { return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch (e) { return ''; } }
   function fmtTime(ts) { try { return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } }
   function fmtStamp(ts) { return fmtDate(ts) + ', ' + fmtTime(ts); }
   function nf(n) { return Number(n || 0).toLocaleString('en-US'); }
   function attempt(fn) { return new Promise(function (res) { res(fn()); }); }
+  function msg(e) {
+    var m = (e && e.message) ? String(e.message) : String(e || 'Something went wrong.');
+    if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Cannot reach the server. Check your connection and try again.';
+    if (/Invalid login credentials/i.test(m)) return 'Incorrect email or password.';
+    if (/already registered|already been registered/i.test(m)) return 'An account with that email already exists. Try signing in.';
+    if (/Password should be at least/i.test(m)) return 'Password must be at least 8 characters.';
+    if (/Token has expired|otp_expired|invalid.*(token|otp)/i.test(m)) return 'That code is wrong or has expired. Check it, or ask for a new one.';
+    if (/Email not confirmed/i.test(m)) return 'EMAIL_NOT_CONFIRMED';
+    if (/rate limit|security purposes|too many/i.test(m)) return 'Too many tries. Please wait a little and try again.';
+    if (/Identity is already linked|already linked/i.test(m)) return 'That Discord account is already linked to another profile.';
+    if (/Manual linking is disabled/i.test(m)) return 'Linking is switched off on the server. The site owner must turn on "Allow manual linking".';
+    return m;
+  }
 
-  /* ---------- storage (falls back to memory when the browser blocks it) ---------- */
+  /* ---------- browser storage (never throws; falls back to memory) ---------- */
   var lsOk = (function () { try { var k = '__xk'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; } catch (e) { return false; } })();
   var mem = {};
   function rawGet(k) { if (lsOk) { try { return localStorage.getItem(k); } catch (e) {} } return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; }
   function rawSet(k, v) { if (lsOk) { try { localStorage.setItem(k, v); return; } catch (e) {} } mem[k] = v; }
   function rawDel(k) { if (lsOk) { try { localStorage.removeItem(k); } catch (e) {} } delete mem[k]; }
-  function get(k, d) { var v = rawGet(k); if (v == null) return d; try { return JSON.parse(v); } catch (e) { return d; } }
-  function set(k, v) { rawSet(k, JSON.stringify(v)); }
+  function sGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return mem['s:' + k] || null; } }
+  function sSet(k, v) { try { sessionStorage.setItem(k, v); } catch (e) { mem['s:' + k] = v; } }
+  function sDel(k) { try { sessionStorage.removeItem(k); } catch (e) { delete mem['s:' + k]; } }
 
-  var adminMem = false;
-  function adminOn() { try { return sessionStorage.getItem(K.admin) === '1'; } catch (e) { return adminMem; } }
-  function setAdmin(v) { adminMem = v; try { if (v) sessionStorage.setItem(K.admin, '1'); else sessionStorage.removeItem(K.admin); } catch (e) {} }
+  /* Remember Me: ticked = the sign-in is kept on this device (localStorage).
+     Unticked = it lives only in this tab/browser session (sessionStorage) and disappears when it closes. */
+  function remember() { return rawGet(K.remember) !== '0'; }
+  function setRemember(v) { rawSet(K.remember, v ? '1' : '0'); }
+  var authStore = {
+    getItem: function (k) {
+      var v = null;
+      try { v = localStorage.getItem(k); } catch (e) {}
+      if (v == null) { try { v = sessionStorage.getItem(k); } catch (e) {} }
+      return v == null ? (Object.prototype.hasOwnProperty.call(mem, 'a:' + k) ? mem['a:' + k] : null) : v;
+    },
+    setItem: function (k, v) {
+      var keep = remember(), main = keep ? 'localStorage' : 'sessionStorage', other = keep ? 'sessionStorage' : 'localStorage';
+      try { window[main].setItem(k, v); try { window[other].removeItem(k); } catch (e) {} } catch (e) { mem['a:' + k] = v; }
+    },
+    removeItem: function (k) {
+      try { localStorage.removeItem(k); } catch (e) {}
+      try { sessionStorage.removeItem(k); } catch (e) {}
+      delete mem['a:' + k];
+    }
+  };
 
-  /* ---------- password hashing ---------- */
-  function b2h(buf) { return Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join(''); }
-  function derive(pw, salt, iter) {
-    if (!window.crypto || !crypto.subtle) return Promise.reject(new Error('This page needs a secure (HTTPS) connection to check passwords.'));
-    var enc = new TextEncoder();
-    return crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveBits']).then(function (k) {
-      return crypto.subtle.deriveBits({ name: 'PBKDF2', salt: enc.encode(salt), iterations: iter, hash: 'SHA-256' }, k, 256);
-    }).then(b2h);
-  }
-  function throttle(max, ms) {
-    var n = 0, until = 0;
+  /* ======================= Supabase connection ======================= */
+  var sb = null, fatal = '';
+  (function () {
+    if (!window.supabase || !window.supabase.createClient) { fatal = 'The Supabase library did not load. Check that vendor/supabase.js is uploaded next to the pages.'; return; }
+    if (!C.supabaseUrl || !C.supabaseKey) { fatal = 'config.js is missing the Supabase URL or key.'; return; }
+    var baseFetch = window.fetch.bind(window);
+    function clockFetch(a, b) {
+      return baseFetch(a, b).then(function (r) {
+        try { var d = r.headers && r.headers.get('date'); if (d) { var t = Date.parse(d); if (t) skew = t - Date.now(); } } catch (e) {}
+        return r;
+      });
+    }
+    sb = window.supabase.createClient(C.supabaseUrl, C.supabaseKey, {
+      auth: { storage: authStore, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'pkce' },
+      global: { fetch: clockFetch },
+      realtime: { params: { eventsPerSecond: 5 } }
+    });
+  })();
+
+  /* The folder the site lives in, with a trailing slash. Used as the OAuth return address. */
+  function siteDir() { return location.origin + location.pathname.replace(/[^\/]*$/, ''); }
+
+  function must(res) { if (res && res.error) throw res.error; return res ? res.data : null; }
+  function rpc(name, args) { return sb.rpc(name, args || {}).then(must); }
+
+  /* ======================= state ======================= */
+  var S = {
+    ready: false, session: null, user: null, me: null, identities: [],
+    posts: [], shop: [], quiz: null, orders: [], ledger: [], myReports: [],
+    adminActive: false, adminMode: sGet(K.adminMode) === '1',
+    adm: { accounts: [], audit: [], reports: [], sessions: [], loaded: false }
+  };
+
+  function normAvatar(u) { return typeof u === 'string' && /^https:\/\//.test(u) ? u : null; }
+  function normMe(p) {
     return {
-      wait: function () { return Math.max(0, Math.ceil((until - Date.now()) / 1000)); },
-      fail: function () { n++; if (n >= max) { until = Date.now() + ms; n = 0; } },
-      reset: function () { n = 0; }
+      id: p.id, username: p.username, email: S.user && S.user.email || null, avatar: normAvatar(p.avatar_url),
+      coins: Number(p.coins || 0), gold: Number(p.gold || 0), vip: !!p.is_vip, staff: p.staff_role || null,
+      notifyQuiz: !!p.notify_quiz
     };
   }
-  var loginThrottle = throttle(5, 30000), adminThrottle = throttle(5, 30000);
+  function me() { return S.me; }
 
-  /* ======================= Data layer ======================= */
-  function users() { return get(K.users, []); }
-  function saveUsers(a) { set(K.users, a); emit('data'); }
-  function userById(id) { return users().filter(function (u) { return u.id === id; })[0] || null; }
-  function currentUser() {
-    var s = get(K.session, null);
-    if (!s) return null;
-    var u = userById(s.id);
-    if (!u) { rawDel(K.session); return null; }
-    return u;
+  function loadMe() {
+    if (!S.session) { S.me = null; S.identities = []; return Promise.resolve(); }
+    S.user = S.session.user;
+    return sb.from('profiles').select('*').eq('id', S.user.id).maybeSingle().then(function (r) {
+      if (r.error) throw r.error;
+      S.me = r.data ? normMe(r.data) : null;
+    }).then(function () {
+      return sb.auth.getUserIdentities().then(function (r) { S.identities = (r.data && r.data.identities) || []; }, function () { S.identities = S.user.identities || []; });
+    });
   }
-  function setSession(id) { set(K.session, { id: id }); emit('data'); }
-  function newUser(o) {
-    return {
-      id: uid(), username: o.username, email: o.email || null, salt: o.salt || null, hash: o.hash || null,
-      role: 'player', avatar: null, coins: 0, gold: 0, linked: { google: null, discord: null },
-      items: [], ledger: [], notifyQuiz: false, createdAt: Date.now()
-    };
-  }
-  function checkUsername(name, ignoreId) {
-    if (!/^[A-Za-z0-9_.-]{3,20}$/.test(name)) return 'Username must be 3 to 20 characters: letters, numbers, dot, dash or underscore.';
-    var clash = users().some(function (u) { return u.id !== ignoreId && u.username.toLowerCase() === name.toLowerCase(); });
-    return clash ? 'That username is taken.' : '';
-  }
-  function checkEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) ? '' : 'Enter a valid email address.'; }
 
-  var auth = {
-    current: currentUser,
-    list: users,
-    byId: userById,
-    checkUsername: checkUsername,
-    register: function (o) {
-      var username = String(o.username || '').trim(), email = String(o.email || '').trim().toLowerCase();
-      var e = checkUsername(username) || checkEmail(email) || (String(o.password || '').length < 8 ? 'Password must be at least 8 characters.' : '');
-      if (e) return Promise.reject(new Error(e));
-      if (users().some(function (u) { return u.email === email; })) return Promise.reject(new Error('An account with that email already exists.'));
-      var salt = uid() + uid();
-      return derive(o.password, salt, CONFIG.userIterations).then(function (hash) {
-        var list = users(), u = newUser({ username: username, email: email, salt: salt, hash: hash });
-        list.push(u); saveUsers(list); setSession(u.id);
-        return u;
+  function loadPosts() {
+    return Promise.all([
+      sb.from('posts').select('*').order('created_at', { ascending: false }).limit(100),
+      sb.from('reactions').select('post_id,user_id,emoji').limit(5000),
+      sb.from('replies_public').select('id,post_id,body,created_at').order('created_at', { ascending: true }).limit(2000)
+    ]).then(function (r) {
+      r.forEach(function (x) { if (x.error) throw x.error; });
+      var reacts = {}, reps = {};
+      r[1].data.forEach(function (x) { ((reacts[x.post_id] = reacts[x.post_id] || {})[x.emoji] = (reacts[x.post_id][x.emoji] || [])).push(x.user_id); });
+      r[2].data.forEach(function (x) { (reps[x.post_id] = reps[x.post_id] || []).push({ id: x.id, ts: Date.parse(x.created_at), text: x.body }); });
+      S.posts = r[0].data.map(function (p) {
+        return { id: p.id, type: p.kind, title: p.title, body: p.body, createdAt: Date.parse(p.created_at), author: 'XKing Studio',
+          when: p.event_when || '', link: p.event_link || '', reactions: reacts[p.id] || {}, replies: reps[p.id] || [] };
       });
-    },
-    login: function (id, pw) {
-      var w = loginThrottle.wait();
-      if (w) return Promise.reject(new Error('Too many attempts. Try again in ' + w + 's.'));
-      var key = String(id || '').trim().toLowerCase();
-      var u = users().filter(function (x) { return x.username.toLowerCase() === key || (x.email && x.email === key); })[0];
-      var bad = new Error('Incorrect email, username or password.');
-      if (!u) { loginThrottle.fail(); return Promise.reject(bad); }
-      if (!u.hash) return Promise.reject(new Error('This account signs in with Google or Discord. Use one of those buttons.'));
-      return derive(pw, u.salt, CONFIG.userIterations).then(function (h) {
-        if (h !== u.hash) { loginThrottle.fail(); throw bad; }
-        loginThrottle.reset(); setSession(u.id); return u;
-      });
-    },
-    provider: function (p, handle) {
-      handle = String(handle || '').trim();
-      if (handle.length < 2 || handle.length > 32) throw new Error('Enter a handle between 2 and 32 characters.');
-      var list = users(), lc = handle.toLowerCase();
-      var u = list.filter(function (x) { return x.linked[p] && x.linked[p].toLowerCase() === lc; })[0];
-      if (!u) {
-        var base = handle.replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 16) || 'player', name = base, n = 1;
-        while (name.length < 3 || checkUsername(name)) { name = base + (++n); }
-        u = newUser({ username: name });
-        u.linked[p] = handle; list.push(u); saveUsers(list);
+    });
+  }
+
+  function loadShop() {
+    return sb.from('shop_items').select('*').eq('available', true).order('sort', { ascending: true }).then(function (r) {
+      if (r.error) throw r.error; S.shop = r.data;
+    });
+  }
+
+  /* ----- quiz ----- */
+  var qFetchAt = 0;
+  function loadQuestion(q) {
+    qFetchAt = Date.now();
+    return sb.from('quiz_questions').select('question').eq('quiz_id', q.id).maybeSingle().then(function (r) {
+      if (r.error) throw r.error;
+      if (r.data) q.question = r.data.question;
+    });
+  }
+  function loadQuiz() {
+    return sb.from('quizzes').select('*').order('created_at', { ascending: false }).limit(1).then(function (r) {
+      if (r.error) throw r.error;
+      var row = r.data && r.data[0];
+      if (!row) { S.quiz = null; return; }
+      var prev = S.quiz && S.quiz.id === row.id ? S.quiz : null;
+      var q = { id: row.id, startsAt: Date.parse(row.starts_at), status: row.status, question: prev ? prev.question : null, key: null, answers: [], mine: null };
+      S.quiz = q;
+      var jobs = [];
+      if (!q.question && now() >= q.startsAt - 500) jobs.push(loadQuestion(q));
+      if (S.me) {
+        jobs.push(sb.from('quiz_answers').select('id,user_id,answer,result,created_at').eq('quiz_id', q.id).then(function (a) {
+          if (a.error) throw a.error;
+          var rows = a.data.map(function (x) { return { id: x.id, userId: x.user_id, text: x.answer, result: x.result, ts: Date.parse(x.created_at) }; });
+          q.mine = rows.filter(function (x) { return x.userId === S.me.id; })[0] || null;
+          if (adminOn()) q.answers = rows;
+        }));
       }
-      setSession(u.id); return u;
-    },
-    logout: function () { rawDel(K.session); emit('data'); },
-    update: function (id, patch) {
-      var list = users(), u = list.filter(function (x) { return x.id === id; })[0];
-      if (!u) throw new Error('Account not found.');
-      Object.keys(patch).forEach(function (k) { u[k] = patch[k]; });
-      saveUsers(list); return u;
-    },
-    link: function (id, p, handle) {
-      handle = String(handle || '').trim();
-      if (handle.length < 2 || handle.length > 32) throw new Error('Enter a handle between 2 and 32 characters.');
-      var list = users(), lc = handle.toLowerCase();
-      var other = list.filter(function (x) { return x.id !== id && x.linked[p] && x.linked[p].toLowerCase() === lc; })[0];
-      if (other) throw new Error('That ' + p + ' account is already linked to another profile.');
-      var u = list.filter(function (x) { return x.id === id; })[0];
-      u.linked[p] = handle; saveUsers(list); return u;
-    },
-    unlink: function (id, p) {
-      var list = users(), u = list.filter(function (x) { return x.id === id; })[0];
-      var n = (u.hash ? 1 : 0) + (u.linked.google ? 1 : 0) + (u.linked.discord ? 1 : 0);
-      if (n <= 1) throw new Error('Keep at least one way to sign in. Link another account first.');
-      u.linked[p] = null; saveUsers(list); return u;
-    },
-    award: function (userId, delta, currency, reason, by) {
-      delta = Math.trunc(Number(delta));
-      if (!delta) throw new Error('Enter an amount other than 0.');
-      var list = users(), u = list.filter(function (x) { return x.id === userId; })[0];
-      if (!u) throw new Error('Account not found.');
-      var key = currency === 'gold' ? 'gold' : 'coins', next = (u[key] || 0) + delta;
-      if (next < 0) throw new Error('Balance cannot go below 0.');
-      u[key] = next;
-      u.ledger = u.ledger || [];
-      u.ledger.unshift({ id: uid(), ts: Date.now(), delta: delta, currency: key, reason: reason || '', by: by || 'System' });
-      u.ledger = u.ledger.slice(0, 100);
-      saveUsers(list); return u;
-    },
-    remove: function (id) {
-      saveUsers(users().filter(function (u) { return u.id !== id; }));
-      var s = get(K.session, null); if (s && s.id === id) rawDel(K.session);
-    }
-  };
-
-  /* ---------- audit log ---------- */
-  function auditAdd(action, target, detail) {
-    var a = get(K.audit, []);
-    a.unshift({ id: uid(), ts: Date.now(), action: action, target: target || '', detail: detail || '' });
-    set(K.audit, a.slice(0, 200)); emit('data');
+      if (adminOn()) jobs.push(sb.from('quiz_keys').select('answer_key').eq('quiz_id', q.id).maybeSingle().then(function (k) { if (!k.error && k.data) q.key = k.data.answer_key; }));
+      return Promise.all(jobs);
+    });
+  }
+  function quizPhase(q) {
+    if (!q) return 'none';
+    if (q.status === 'closed') return 'closed';
+    if (now() < q.startsAt) return 'scheduled';
+    return q.question ? 'live' : 'starting';
   }
 
-  /* ---------- posts ---------- */
-  function seedPosts() {
-    var now = Date.now();
-    return [
-      { id: uid(), type: 'announcement', title: 'Welcome to the XKing hub', createdAt: now - 3600000, author: 'XKing Studio', sample: true, reactions: {}, replies: [],
-        body: 'This is where announcements, events and games for **XKing Supreme Large City** live.\n\n- Read every announcement, even if you are not on Discord\n- Join events and earn Coins\n- Play ACT Games\n\nSign up to save your progress.' },
-      { id: uid(), type: 'announcement', title: 'Where to download the modpacks', createdAt: now - 7200000, author: 'XKing Studio', sample: true, reactions: {}, replies: [],
-        body: 'The modpacks are published on CurseForge and Modrinth. Every link is on our LinkTree.\n\n> Forge 1.20.1 is the main version. NeoForge 1.21.1 is the lighter one for weaker PCs and laptops.' },
-      { id: uid(), type: 'event', title: 'Live Trivia Quiz nights', createdAt: now - 5400000, author: 'XKing Studio', sample: true, reactions: {}, replies: [], when: 'Whenever an operator posts a quiz', link: '',
-        body: 'Operators run live Trivia Quizzes from the **ACT Games** tab. A correct answer earns **10 Coins**.\n\nTurn on quiz notifications to get a 20-second heads-up.' }
-    ];
+  /* ----- orders and activity ----- */
+  function loadWallet() {
+    if (!S.me) { S.orders = []; S.ledger = []; S.myReports = []; return Promise.resolve(); }
+    return Promise.all([
+      sb.from('purchase_orders').select('id,item_id,status,created_at,shop_items(name)').order('created_at', { ascending: false }).limit(50),
+      sb.from('ledger').select('id,currency,delta,reason,created_at').order('created_at', { ascending: false }).limit(15),
+      sb.from('reports').select('id,kind,title,status,created_at').order('created_at', { ascending: false }).limit(20)
+    ]).then(function (r) {
+      S.orders = r[0].error ? [] : r[0].data;
+      S.ledger = r[1].error ? [] : r[1].data;
+      S.myReports = r[2].error ? [] : r[2].data;
+    });
   }
-  function allPosts() { var p = get(K.posts, null); if (!p) { p = seedPosts(); set(K.posts, p); } return p; }
-  function savePosts(p) { set(K.posts, p); emit('data'); }
-  var posts = {
-    list: function (type) { return allPosts().filter(function (p) { return !type || p.type === type; }).sort(function (a, b) { return b.createdAt - a.createdAt; }); },
-    add: function (o) {
-      var list = allPosts();
-      var p = { id: uid(), type: o.type === 'event' ? 'event' : 'announcement', title: o.title, body: o.body, createdAt: Date.now(), author: 'XKing Studio', reactions: {}, replies: [], link: o.link || '', when: o.when || '' };
-      list.unshift(p); savePosts(list); auditAdd('Posted ' + p.type, p.title); return p;
-    },
-    remove: function (id) {
-      var list = allPosts(), p = list.filter(function (x) { return x.id === id; })[0];
-      savePosts(list.filter(function (x) { return x.id !== id; }));
-      if (p) auditAdd('Deleted ' + p.type, p.title);
-    },
-    react: function (pid, emoji, userId) {
-      var list = allPosts(), p = list.filter(function (x) { return x.id === pid; })[0];
-      if (!p || EMOJI.indexOf(emoji) < 0) return;
-      p.reactions = p.reactions || {};
-      var arr = p.reactions[emoji] || [], i = arr.indexOf(userId);
-      if (i >= 0) arr.splice(i, 1); else arr.push(userId);
-      p.reactions[emoji] = arr; savePosts(list);
-    },
-    reply: function (pid, userId, text) {
-      text = String(text || '').trim();
-      if (!text) throw new Error('Write something first.');
-      if (text.length > 400) throw new Error('Replies are limited to 400 characters.');
-      var list = allPosts(), p = list.filter(function (x) { return x.id === pid; })[0];
-      if (!p) throw new Error('That post no longer exists.');
-      p.replies = p.replies || [];
-      p.replies.push({ id: uid(), ts: Date.now(), text: text, userId: userId });
-      savePosts(list);
-    },
-    removeReply: function (pid, rid) {
-      var list = allPosts(), p = list.filter(function (x) { return x.id === pid; })[0];
-      if (!p) return;
-      p.replies = (p.replies || []).filter(function (r) { return r.id !== rid; });
-      savePosts(list); auditAdd('Deleted a reply', p.title);
-    }
-  };
 
-  /* ---------- trivia quiz ---------- */
-  function getQuiz() { return get(K.quiz, null); }
-  function phase(q) { if (!q) return 'none'; if (q.status === 'closed') return 'closed'; return Date.now() < q.startsAt ? 'scheduled' : 'live'; }
-  var quiz = {
-    get: getQuiz,
-    phase: phase,
-    post: function (question, key) {
-      question = String(question || '').trim();
-      if (!question) throw new Error('Write the question first.');
-      var now = Date.now();
-      var q = { id: uid(), question: question, key: String(key || '').trim(), postedAt: now, startsAt: now + CONFIG.quizDelayMs, status: 'open', answers: [] };
-      set(K.quiz, q); auditAdd('Posted Trivia Quiz', question.slice(0, 80)); return q;
+  /* ----- admin ----- */
+  function adminOn() { return !!(S.me && S.me.staff && S.adminMode && S.adminActive); }
+  function checkAdmin() {
+    if (!S.me || !S.me.staff) { S.adminActive = false; return Promise.resolve(); }
+    return sb.rpc('is_admin_active').then(function (r) {
+      var was = S.adminActive; S.adminActive = r.error ? false : !!r.data;
+      if (S.adminMode && !S.adminActive) { setMode(false); if (was) toast('Your admin session ended.'); }
+    });
+  }
+  function setMode(v) { S.adminMode = v; if (v) sSet(K.adminMode, '1'); else sDel(K.adminMode); emit('admin'); }
+  function loadAdmin() {
+    if (!adminOn()) { S.adm.loaded = false; return Promise.resolve(); }
+    var leader = S.me.staff === 'leader';
+    return Promise.all([
+      sb.rpc('admin_list_accounts'),
+      sb.from('audit_log').select('id,actor,action,target,detail,created_at').order('created_at', { ascending: false }).limit(60),
+      sb.from('reports').select('*').order('created_at', { ascending: false }).limit(100),
+      leader ? sb.from('admin_sessions').select('*').order('requested_at', { ascending: false }).limit(40) : Promise.resolve({ data: [] })
+    ]).then(function (r) {
+      var a = S.adm;
+      a.accounts = r[0].error ? [] : (r[0].data || []);
+      var names = {}; a.accounts.forEach(function (x) { names[x.id] = x.username; });
+      a.names = names;
+      a.audit = r[1].error ? [] : r[1].data.map(function (x) { return { id: x.id, ts: Date.parse(x.created_at), action: x.action, target: x.target, detail: x.detail, actor: names[x.actor] || '' }; });
+      a.reports = r[2].error ? [] : r[2].data.map(function (x) { return { id: x.id, kind: x.kind, title: x.title, details: x.details, link: x.external_link, status: x.status, ts: Date.parse(x.created_at), who: names[x.user_id] || 'Deleted user' }; });
+      a.sessions = (r[3].data || []).map(function (x) { return { id: x.id, who: names[x.user_id] || 'Unknown', status: x.status, requestedAt: Date.parse(x.requested_at), expiresAt: x.expires_at ? Date.parse(x.expires_at) : 0 }; });
+      a.loaded = true;
+    });
+  }
+
+  /* ----- refresh everything ----- */
+  var refreshing = null, again = false;
+  function swallow(label) { return function (e) { try { console.warn('[xking] ' + label + ':', e && e.message || e); } catch (x) {} }; }
+  function refresh() {
+    if (!sb) return Promise.resolve();
+    if (refreshing) { again = true; return refreshing; }
+    refreshing = loadMe().catch(swallow('profile'))
+      .then(function () { return checkAdmin().catch(swallow('admin check')); })
+      .then(function () {
+        return Promise.all([
+          loadPosts().catch(swallow('posts')), loadQuiz().catch(swallow('quiz')), loadShop().catch(swallow('shop')),
+          loadWallet().catch(swallow('wallet')), loadAdmin().catch(swallow('admin data'))
+        ]);
+      })
+      .then(function () { S.ready = true; })
+      .then(function () { refreshing = null; emit('data'); if (again) { again = false; return refresh(); } }, function (e) { refreshing = null; throw e; });
+    return refreshing;
+  }
+  function quick() { return Promise.all([loadPosts().catch(swallow('posts')), loadQuiz().catch(swallow('quiz'))]).then(function () { emit('data'); }); }
+
+  var rtTimer = null, channel = null;
+  function startLive() {
+    if (!sb) return;
+    try {
+      if (channel) { sb.removeChannel(channel); channel = null; }
+      var ch = sb.channel('xk-live');
+      ['posts', 'quizzes', 'quiz_answers', 'profiles', 'admin_sessions'].forEach(function (t) {
+        ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, function () {
+          clearTimeout(rtTimer); rtTimer = setTimeout(function () { refresh().catch(swallow('live refresh')); }, 250);
+        });
+      });
+      ch.subscribe(); channel = ch;
+    } catch (e) { swallow('realtime')(e); }
+    /* Realtime can drop or be blocked, so the page also checks on a timer. */
+    if (!startLive.timer) startLive.timer = setInterval(function () { if (!document.hidden) refresh().catch(swallow('poll')); }, CONFIG.pollMs);
+  }
+
+  /* ======================= actions ======================= */
+  var api = {
+    signUp: function (username, email, password, keep) {
+      setRemember(keep);
+      return sb.auth.signUp({ email: email, password: password, options: { data: { username: username }, emailRedirectTo: siteDir() } }).then(must).then(function (d) {
+        if (!d.session && d.user && d.user.identities && d.user.identities.length === 0) throw new Error('User already registered');
+        return refresh().then(function () { return { signedIn: !!d.session, username: S.me ? S.me.username : username }; });
+      });
     },
-    answer: function (userId, text) {
-      var q = getQuiz();
-      if (phase(q) !== 'live') throw new Error('There is no live quiz right now.');
-      text = String(text || '').trim();
-      if (!text) throw new Error('Type your answer first.');
-      if (q.answers.some(function (a) { return a.userId === userId; })) throw new Error('You already answered this quiz.');
-      q.answers.push({ id: uid(), userId: userId, text: text.slice(0, 120), ts: Date.now(), result: 'pending' });
-      set(K.quiz, q); emit('data');
+    verifyCode: function (email, code, keep) {
+      setRemember(keep);
+      return sb.auth.verifyOtp({ email: email, token: code, type: 'signup' }).then(must).then(function (d) { if (d && d.session) S.session = d.session; return refresh(); }).then(function () { return { username: S.me ? S.me.username : '' }; });
     },
-    mark: function (answerId, result) {
-      var q = getQuiz();
-      var a = q && q.answers.filter(function (x) { return x.id === answerId; })[0];
-      if (!a) throw new Error('Answer not found.');
-      if (a.result !== 'pending') throw new Error('That answer is already marked.');
-      if (result === 'correct') auth.award(a.userId, CONFIG.quizReward, 'coins', 'Trivia Quiz: correct answer', 'Operator');
-      a.result = result === 'correct' ? 'correct' : 'wrong';
-      set(K.quiz, q);
-      var who = userById(a.userId);
-      auditAdd('Marked answer ' + a.result, who ? who.username : 'Deleted user', a.text);
+    resendCode: function (email) { return sb.auth.resend({ type: 'signup', email: email }).then(must); },
+    signIn: function (email, password, keep) {
+      setRemember(keep);
+      return sb.auth.signInWithPassword({ email: email, password: password }).then(must);
     },
-    close: function () {
-      var q = getQuiz(); if (!q) return;
-      q.status = 'closed'; set(K.quiz, q); auditAdd('Closed Trivia Quiz', q.question.slice(0, 80));
-    }
+    discord: function (keep) {
+      setRemember(keep);
+      return sb.auth.signInWithOAuth({ provider: 'discord', options: { redirectTo: siteDir(), scopes: 'identify email' } }).then(must);
+    },
+    linkDiscord: function () {
+      return sb.auth.linkIdentity({ provider: 'discord', options: { redirectTo: siteDir(), scopes: 'identify email' } }).then(must);
+    },
+    unlink: function (identity) { return sb.auth.unlinkIdentity(identity).then(must).then(refresh); },
+    signOut: function () { setMode(false); return sb.auth.signOut().then(function () { S.session = null; S.me = null; S.identities = []; S.adminActive = false; S.adm.loaded = false; return refresh(); }); },
+    react: function (pid, emoji) {
+      var p = S.posts.filter(function (x) { return x.id === pid; })[0], arr = p && (p.reactions[emoji] = p.reactions[emoji] || []);
+      if (!p) return Promise.resolve();
+      var i = arr.indexOf(S.me.id), q;
+      if (i >= 0) { arr.splice(i, 1); q = sb.from('reactions').delete().eq('post_id', pid).eq('user_id', S.me.id).eq('emoji', emoji); }
+      else { arr.push(S.me.id); q = sb.from('reactions').insert({ post_id: pid, emoji: emoji }); }
+      emit('data');
+      return q.then(must).catch(function (e) { return loadPosts().then(function () { emit('data'); throw e; }); });
+    },
+    reply: function (pid, text) { return rpc('post_reply', { p_post: pid, p_body: text }).then(loadPosts).then(function () { emit('data'); }); },
+    setNotify: function (v) { return sb.from('profiles').update({ notify_quiz: v }).eq('id', S.me.id).then(must).then(function () { S.me.notifyQuiz = v; }); },
+    rename: function (name) {
+      return sb.from('profiles').update({ username: name }).eq('id', S.me.id).then(function (r) {
+        if (r.error) { throw (r.error.code === '23505' ? new Error('That username is taken.') : r.error.code === '23514' ? new Error('Username must be 3 to 20 characters: letters, numbers, dot, dash or underscore.') : r.error); }
+        S.me.username = name; emit('data');
+      });
+    },
+    uploadAvatar: function (blob) {
+      var path = S.me.id + '/avatar-' + Date.now() + '.jpg', old = S.me.avatar;
+      return sb.storage.from('avatars').upload(path, blob, { contentType: 'image/jpeg', cacheControl: '31536000', upsert: false }).then(must).then(function () {
+        var url = sb.storage.from('avatars').getPublicUrl(path).data.publicUrl;
+        return sb.from('profiles').update({ avatar_url: url }).eq('id', S.me.id).then(must).then(function () {
+          S.me.avatar = url; emit('data');
+          if (old && old.indexOf('/avatars/' + S.me.id + '/') > 0) { sb.storage.from('avatars').remove([old.split('/avatars/')[1]]).catch(function () {}); }
+        });
+      });
+    },
+    removeAvatar: function () {
+      var old = S.me.avatar;
+      return sb.from('profiles').update({ avatar_url: null }).eq('id', S.me.id).then(must).then(function () {
+        S.me.avatar = null; emit('data');
+        if (old && old.indexOf('/avatars/' + S.me.id + '/') > 0) { sb.storage.from('avatars').remove([old.split('/avatars/')[1]]).catch(function () {}); }
+      });
+    },
+    answer: function (quizId, text) { return rpc('submit_answer', { p_quiz: quizId, p_answer: text }).then(loadQuiz).then(function () { emit('data'); }); },
+    buy: function (id) { return rpc('purchase_item', { p_item: id }).then(refresh); },
+    sendReport: function (o) {
+      return sb.from('reports').insert({ kind: o.kind, title: o.title, details: o.details, external_link: o.link || null }).then(must).then(loadWallet).then(function () { emit('data'); });
+    },
+    /* ----- staff ----- */
+    postQuiz: function (q, key) { return rpc('post_quiz', { p_question: q, p_key: key || null }).then(function () { return refresh(); }); },
+    closeQuiz: function (id) { return rpc('close_quiz', { p_quiz: id }).then(refresh); },
+    mark: function (id, ok) { return rpc('mark_answer', { p_answer: id, p_correct: ok }).then(refresh); },
+    addPost: function (o) { return rpc('admin_create_post', { p_kind: o.type, p_title: o.title, p_body: o.body, p_when: o.when || null, p_link: o.link || null }).then(refresh); },
+    delPost: function (id) { return rpc('admin_delete_post', { p_id: id }).then(refresh); },
+    delReply: function (id) { return rpc('admin_delete_reply', { p_id: id }).then(refresh); },
+    reportStatus: function (id, s) { return rpc('admin_set_report_status', { p_id: id, p_status: s }).then(refresh); },
+    adjust: function (user, cur, delta, reason) { return rpc('admin_adjust_balance', { p_user: user, p_currency: cur, p_delta: delta, p_reason: reason }).then(refresh); },
+    setVip: function (user, vip, usd, method, note) { return rpc('admin_set_vip', { p_user: user, p_vip: vip, p_amount_usd: usd, p_method: method, p_note: note || '' }).then(refresh); },
+    renameUser: function (user, name) { return rpc('admin_rename_user', { p_user: user, p_username: name }).then(refresh); },
+    deleteUser: function (user) { return rpc('admin_delete_user', { p_user: user }).then(refresh); },
+    setStaff: function (user, role) { return rpc('set_staff_role', { p_user: user, p_role: role }).then(refresh); },
+    transfer: function (user) { return rpc('transfer_leader', { p_user: user }).then(function () { setMode(false); return refresh(); }); },
+    decide: function (id, ok, hours) { return rpc('decide_admin_session', { p_id: id, p_approve: ok, p_hours: hours }).then(refresh); },
+    revoke: function (id) { return rpc('revoke_admin_session', { p_id: id }).then(refresh); },
+    setAdminPassword: function (pw) { return rpc('set_admin_password', { p_new: pw }); }
   };
 
   /* ---------- markdown (HTML is escaped first, so output is safe) ---------- */
@@ -402,16 +487,6 @@
   function confirmDialog(title, message, confirmLabel, danger) {
     return dialog({ title: title, message: message, confirmLabel: confirmLabel || 'Confirm', danger: danger });
   }
-  function providerDialog(provider) {
-    var name = provider === 'google' ? 'Google' : 'Discord';
-    return dialog({
-      title: 'Continue with ' + name,
-      message: 'Preview build: ' + name + ' sign-in is not connected to a server yet. Enter a handle to simulate it. Coins stay in sync across every account linked to the same profile.',
-      fields: [{ name: 'handle', label: name + ' handle', required: true, placeholder: provider === 'google' ? 'you@gmail.com' : 'yourname' }],
-      confirmLabel: 'Continue'
-    }).then(function (v) { return v ? v.handle.trim() : null; });
-  }
-
   /* ---------- theme ---------- */
   function themeMode() { var m = rawGet(K.theme); return m === 'light' || m === 'dark' ? m : 'device'; }
   function isDark() {
@@ -526,23 +601,44 @@
   /* ---------- avatar ---------- */
   function avatar(u, size) {
     var cls = 'avatar avatar-' + (size || 'sm');
-    if (u && typeof u.avatar === 'string' && u.avatar.indexOf('data:image/') === 0) return '<img class="' + cls + '" src="' + esc(u.avatar) + '" alt="">';
+    if (u && u.avatar) return '<img class="' + cls + '" src="' + esc(u.avatar) + '" alt="" loading="lazy">';
     return '<span class="' + cls + ' avatar-empty" aria-hidden="true">' + ICON.person + '</span>';
   }
 
   /* ---------- admin gate ---------- */
   var admin = {
     on: adminOn,
-    unlock: function (pw) {
-      var w = adminThrottle.wait();
-      if (w) return Promise.reject(new Error('Too many attempts. Try again in ' + w + 's.'));
-      return derive(pw, CONFIG.admin.salt, CONFIG.admin.iterations).then(function (h) {
-        if (h === CONFIG.admin.hash) { adminThrottle.reset(); setAdmin(true); emit('admin'); return true; }
-        adminThrottle.fail(); throw new Error('Wrong password.');
-      });
-    },
-    lock: function () { setAdmin(false); emit('admin'); }
+    exit: function () { setMode(false); }
   };
+  function enterAdmin(res) {
+    return checkAdmin().then(function () {
+      if (!S.adminActive) throw new Error('The server did not grant admin access.');
+      setMode(true); return refresh();
+    });
+  }
+  function waitOverlay(sid) {
+    return new Promise(function (resolve) {
+      var ov = document.createElement('div'); ov.className = 'overlay';
+      ov.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="wt"><h2 id="wt" class="display">Waiting for the Leader</h2>' +
+        '<p class="modal-msg">Your password is correct. The Leader must approve this admin session before you can operate. Keep this page open.</p>' +
+        '<p class="wait-dots" role="status" aria-live="polite">Waiting for approval<span>.</span><span>.</span><span>.</span></p>' +
+        '<div class="modal-actions"><button type="button" class="btn-ghost" data-x="cancel">Stop waiting</button></div></div>';
+      document.body.appendChild(ov);
+      var timer = null, done = false;
+      function close(v) { if (done) return; done = true; clearTimeout(timer); ov.remove(); resolve(v); }
+      $('[data-x="cancel"]', ov).addEventListener('click', function () { close('cancel'); });
+      function poll() {
+        if (done) return;
+        sb.from('admin_sessions').select('status').eq('id', sid).maybeSingle().then(function (r) {
+          var s = r.data && r.data.status;
+          if (s === 'approved') close('approved');
+          else if (s === 'denied' || s === 'revoked') close(s);
+          else timer = setTimeout(poll, 3000);
+        }, function () { timer = setTimeout(poll, 4000); });
+      }
+      poll();
+    });
+  }
   function mountAdminFab() {
     if ($('#adminFab')) return;
     var b = document.createElement('button');
@@ -554,21 +650,44 @@
       b.setAttribute('aria-pressed', onNow ? 'true' : 'false');
       b.innerHTML = ICON.shield + '<span>' + (onNow ? 'Admin mode on · Exit' : 'Operate as Admin') + '</span>';
     }
+    function after(status, sid) {
+      if (status === 'pending') {
+        return waitOverlay(sid).then(function (r) {
+          if (r === 'approved') return enterAdmin().then(function () { toast('Admin mode on.', 'ok'); });
+          if (r === 'denied') toast('The Leader declined this admin session.', 'error');
+          else if (r === 'revoked') toast('This admin session was revoked.', 'error');
+        });
+      }
+      return enterAdmin().then(function () { toast('Admin mode on.', 'ok'); });
+    }
     b.addEventListener('click', function () {
-      if (adminOn()) { admin.lock(); toast('Admin mode off.'); return; }
+      if (!sb) { toast(fatal, 'error'); return; }
+      if (!S.me) { toast('Sign in first, then use Operate as Admin.'); return; }
+      if (adminOn()) { setMode(false); toast('Admin mode off.'); return; }
+      if (S.me.staff === 'leader') {
+        rpc('request_admin_session', { p_password: '' }).then(function (r) { return after(r.status, r.session_id); }).catch(function (e) { toast(msg(e), 'error'); });
+        return;
+      }
+      var out = null;
       dialog({
         title: 'Operate as Admin',
         message: 'Insert passwords, and operate as admin',
         fields: [{ name: 'password', label: 'Password', type: 'password', required: true, autocomplete: 'off' }],
         confirmLabel: 'Unlock',
-        onSubmit: function (v) { return admin.unlock(v.password); }
-      }).then(function (v) { if (v) toast('Admin mode on.', 'ok'); });
+        onSubmit: function (v) {
+          return rpc('request_admin_session', { p_password: v.password }).then(function (r) {
+            if (r.status === 'wrong_password') throw new Error('Wrong password.');
+            out = r;
+          }, function (e) { throw new Error(msg(e)); });
+        }
+      }).then(function (v) { if (v && out) return after(out.status, out.session_id); }).catch(function (e) { toast(msg(e), 'error'); });
     });
-    on('admin', paint);
+    on('admin', paint); on('data', paint);
     paint();
   }
 
   /* ---------- auth pages ---------- */
+  var WARN_TEXT = 'Your account is easy to lose! Link a Discord account so you can always get back in. Without a linked account, you could lose all the progress and rewards you worked so hard to earn.';
   function strength(pw) {
     var s = 0;
     if (pw.length >= 8) s++;
@@ -577,24 +696,61 @@
     if (/[^A-Za-z0-9]/.test(pw)) s++;
     return s;
   }
+  function showDone(username) {
+    var card = $('.auth-card');
+    card.innerHTML = '<div><p class="eyebrow">Email verified</p><h1 class="display">Welcome, ' + esc(username) + '!</h1></div>' +
+      '<p class="muted">Your account is ready and you are signed in. It is your one XKing account for everything we build, now and in the future.</p>' +
+      '<div class="warn-red" role="alert"><strong>Warning</strong><p>' + esc(WARN_TEXT) + '</p></div>' +
+      '<a class="btn-primary" href="index.html" data-focus>Continue to XKing</a>';
+    var f = $('[data-focus]', card); if (f) f.focus();
+  }
+  function showVerify(email, fromLogin) {
+    var card = $('.auth-card'), left = 0, timer = null;
+    card.innerHTML = '<div><p class="eyebrow">Verify your email</p><h1 class="display">Enter your code</h1></div>' +
+      '<p class="muted">We sent a code to <strong>' + esc(email) + '</strong>. It can take a minute. Check your spam folder too.</p>' +
+      '<form id="otpForm" class="form-stack" novalidate><div class="field"><label for="otp">Code from the email</label>' +
+      '<input id="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" pattern="[0-9]*" required style="letter-spacing:.3em;font-size:1.3rem;text-align:center"></div>' +
+      '<p class="form-error" id="otpErr" role="alert" hidden></p><button type="submit" class="btn-primary" id="otpBtn">Verify</button></form>' +
+      '<div class="provider-row"><button type="button" class="btn-ghost" id="otpResend">Send a new code</button></div>' +
+      '<p class="hint"><a href="' + (fromLogin ? 'login.html' : 'register.html') + '">Use a different email</a></p>';
+    var err = $('#otpErr'), btn = $('#otpBtn'), rs = $('#otpResend'), box = $('#otp');
+    box.focus();
+    function cool(sec) {
+      left = sec; clearInterval(timer);
+      timer = setInterval(function () { left--; if (left <= 0) { clearInterval(timer); rs.disabled = false; rs.textContent = 'Send a new code'; } else rs.textContent = 'Send a new code (' + left + 's)'; }, 1000);
+      rs.disabled = true; rs.textContent = 'Send a new code (' + sec + 's)';
+    }
+    cool(60);
+    rs.addEventListener('click', function () {
+      err.hidden = true;
+      api.resendCode(email).then(function () { toast('A new code was sent.', 'ok'); cool(60); }, function (e) { err.textContent = msg(e); err.hidden = false; });
+    });
+    $('#otpForm').addEventListener('submit', function (e) {
+      e.preventDefault(); err.hidden = true;
+      var code = box.value.replace(/\s+/g, '');
+      if (!/^\d{6,10}$/.test(code)) { err.textContent = 'Type the digits from the email.'; err.hidden = false; return; }
+      btn.disabled = true;
+      api.verifyCode(email, code, remember()).then(function (r) { clearInterval(timer); showDone(r.username || 'friend'); }, function (er) { btn.disabled = false; err.textContent = msg(er); err.hidden = false; box.select(); });
+    });
+  }
   function initAuth(kind) {
-    if (currentUser()) { location.replace('index.html'); return; }
-    var form = $('#authForm'), err = $('#authErr'), btn = $('#authSubmit');
-    function fail(m) { err.textContent = m; err.hidden = false; btn.disabled = false; }
+    var form = $('#authForm'), err = $('#authErr'), btn = $('#authSubmit'), keepBox = $('#remember');
+    function fail(m) { err.textContent = m; err.hidden = false; btn.disabled = false; $$('[data-provider]').forEach(function (x) { x.disabled = false; }); }
     function done() { location.assign('index.html'); }
+    if (keepBox) keepBox.checked = remember();
+    function keep() { return keepBox ? keepBox.checked : true; }
+    if (!sb) { fail(fatal); return; }
+    sb.auth.getSession().then(function (r) { if (r.data && r.data.session) location.replace('index.html'); });
     $$('[data-reveal]').forEach(function (b) {
       b.addEventListener('click', function () {
         var inp = $('#' + b.getAttribute('data-reveal')), show = inp.type === 'password';
         inp.type = show ? 'text' : 'password'; b.textContent = show ? 'Hide' : 'Show'; b.setAttribute('aria-pressed', show ? 'true' : 'false');
       });
     });
-    $$('[data-provider]').forEach(function (b) {
+    $$('[data-provider="discord"]').forEach(function (b) {
       b.addEventListener('click', function () {
-        var p = b.getAttribute('data-provider');
-        providerDialog(p).then(function (handle) {
-          if (!handle) return;
-          try { auth.provider(p, handle); done(); } catch (e) { fail(e.message); }
-        });
+        err.hidden = true; b.disabled = true;
+        api.discord(keep()).catch(function (e) { fail(msg(e)); });
       });
     });
     if (kind === 'register') {
@@ -606,23 +762,57 @@
       });
     }
     form.addEventListener('submit', function (e) {
-      e.preventDefault(); err.hidden = true; btn.disabled = true;
+      e.preventDefault(); err.hidden = true;
+      var email = $('#email').value.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { fail('Enter a valid email address.'); return; }
       if (kind === 'login') {
-        auth.login($('#identifier').value, $('#password').value).then(done, function (er) { fail(er.message); });
-      } else {
-        if ($('#password').value !== $('#confirm').value) { fail('The two passwords do not match.'); return; }
-        auth.register({ username: $('#username').value, email: $('#email').value, password: $('#password').value }).then(done, function (er) { fail(er.message); });
+        btn.disabled = true;
+        api.signIn(email, $('#password').value, keep()).then(done, function (er) {
+          if (msg(er) === 'EMAIL_NOT_CONFIRMED') { api.resendCode(email).catch(function () {}); showVerify(email, true); return; }
+          fail(msg(er));
+        });
+        return;
       }
+      var name = $('#username').value.trim(), p1 = $('#password').value;
+      if (!/^[A-Za-z0-9_.-]{3,20}$/.test(name)) { fail('Username must be 3 to 20 characters: letters, numbers, dot, dash or underscore.'); return; }
+      if (p1.length < 8) { fail('Password must be at least 8 characters.'); return; }
+      if (p1 !== $('#confirm').value) { fail('The two passwords do not match.'); return; }
+      btn.disabled = true;
+      api.signUp(name, email, p1, keep()).then(function (r) {
+        if (r.signedIn) showDone(r.username); else showVerify(email);
+      }, function (er) { fail(msg(er)); });
     });
   }
 
   /* ---------- boot ---------- */
+  function urlProblem() {
+    var q = new URLSearchParams(location.search), h = new URLSearchParams(location.hash.replace(/^#/, ''));
+    var d = q.get('error_description') || h.get('error_description');
+    if (!d) return;
+    try { history.replaceState({}, document.title, location.pathname); } catch (e) {}
+    toast(msg(new Error(d.replace(/\+/g, ' '))), 'error');
+  }
+  function init() {
+    if (!sb) { S.ready = true; emit('data'); return Promise.resolve(); }
+    sb.auth.onAuthStateChange(function (ev, session) {
+      S.session = session;
+      if (ev === 'SIGNED_IN' || ev === 'SIGNED_OUT' || ev === 'USER_UPDATED') setTimeout(function () { refresh().catch(swallow('auth change')); }, 0);
+    });
+    return sb.auth.getSession().then(function (r) { S.session = r.data && r.data.session || null; return refresh(); })
+      .catch(function (e) { swallow('start')(e); S.ready = true; emit('data'); })
+      .then(startLive);
+  }
   function boot() {
     var host = $('#themeHost'); if (host) mountThemeSwitch(host); else applyTheme(themeMode());
     mountAdminFab();
     mountSkyline($('#skyline'));
     on('theme', function () { $$('canvas[data-sky]').forEach(drawSkyline); });
-    window.addEventListener('storage', function (e) { if (e.key && e.key.indexOf('xk1.') === 0) emit('data', { remote: true }); });
+    urlProblem();
+    /* A broken profile photo falls back to the plain person icon. */
+    document.addEventListener('error', function (e) {
+      var t = e.target;
+      if (t && t.tagName === 'IMG' && /(^| )avatar( |$)/.test(t.className)) { var s = document.createElement('span'); s.className = t.className + ' avatar-empty'; s.setAttribute('aria-hidden', 'true'); s.innerHTML = ICON.person; t.replaceWith(s); }
+    }, true);
     if (window.matchMedia) {
       var mq = window.matchMedia('(prefers-color-scheme: dark)');
       var chg = function () { emit('theme'); };
@@ -632,9 +822,11 @@
 
   window.XK = {
     CONFIG: CONFIG, EMOJI: EMOJI, ICON: ICON, $: $, $$: $$, esc: esc, uid: uid, nf: nf, on: on, emit: emit, attempt: attempt,
-    fmtDate: fmtDate, fmtTime: fmtTime, fmtStamp: fmtStamp,
-    auth: auth, posts: posts, quiz: quiz, admin: admin, audit: { add: auditAdd, list: function () { return get(K.audit, []); } },
-    md: md, toast: toast, dialog: dialog, confirm: confirmDialog, providerDialog: providerDialog,
-    avatar: avatar, mountSkyline: mountSkyline, boot: boot, initAuth: initAuth
+    fmtDate: fmtDate, fmtTime: fmtTime, fmtStamp: fmtStamp, now: now, msg: msg,
+    S: S, me: me, api: api, admin: admin, quizPhase: quizPhase, fatal: function () { return fatal; },
+    refresh: refresh, quick: quick, loadQuestion: function () { return S.quiz ? loadQuestion(S.quiz).then(function () { emit('data'); }) : Promise.resolve(); },
+    qFetchedAt: function () { return qFetchAt; },
+    md: md, toast: toast, dialog: dialog, confirm: confirmDialog, WARN_TEXT: WARN_TEXT,
+    avatar: avatar, mountSkyline: mountSkyline, boot: boot, init: init, initAuth: initAuth
   };
 })();

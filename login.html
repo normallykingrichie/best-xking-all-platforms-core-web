@@ -23,10 +23,15 @@
       <p class="eyebrow">Welcome back</p>
       <h1 class="display">Sign in</h1>
     </div>
+    <div class="provider-stack">
+      <button type="button" class="btn-discord" data-provider="discord"><span class="dc-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M19.6 5.3A16.6 16.6 0 0 0 15.5 4l-.5 1.1a15.4 15.4 0 0 0-4.6 0L9.9 4a16.6 16.6 0 0 0-4.1 1.3C3.2 9.2 2.5 13 2.8 16.7a16.7 16.7 0 0 0 5 2.5l1.1-1.7a10.8 10.8 0 0 1-1.7-.8l.4-.3a11.9 11.9 0 0 0 10.1 0l.4.3c-.5.3-1.1.6-1.7.8l1.1 1.7a16.6 16.6 0 0 0 5-2.5c.4-4.3-.7-8.1-2.9-11.4zM9.4 14.5c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm5.2 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></svg></span><span>Sign in with Discord</span><em class="rec-tag">Recommended</em></button>
+      <p class="hint">Discord keeps your progress safe and lets you buy Discord roles with Coins.</p>
+    </div>
+    <div class="divider"><span>or use email</span></div>
     <form id="authForm" class="form-stack" novalidate>
       <div class="field">
-        <label for="identifier">Email or username</label>
-        <input id="identifier" type="text" autocomplete="username" required>
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="email" required>
       </div>
       <div class="field">
         <label for="password">Password</label>
@@ -35,18 +40,17 @@
           <button type="button" data-reveal="password" aria-pressed="false">Show</button>
         </div>
       </div>
+      <label class="switch"><input type="checkbox" id="remember" checked><span class="track"></span><span>Remember me on this device</span></label>
       <p class="form-error" id="authErr" role="alert" hidden></p>
       <button type="submit" id="authSubmit" class="btn-primary">Sign in</button>
     </form>
-    <div class="divider"><span>or continue with</span></div>
-    <div class="provider-row">
-      <button type="button" class="btn-ghost" data-provider="google">Google</button>
-      <button type="button" class="btn-ghost" data-provider="discord">Discord</button>
-    </div>
+    <div class="provider-row"><button type="button" class="btn-ghost" disabled>Google &middot; coming later</button></div>
     <p class="auth-switch">New here? <a href="register.html">Create an account</a></p>
     <p class="auth-switch"><a href="index.html">Back to the public page</a></p>
   </main>
 </div>
+<script src="vendor/supabase.js"></script>
+<script src="config.js"></script>
 <script src="app.js"></script>
 <script>XK.boot(); XK.initAuth('login');</script>
 </body>
