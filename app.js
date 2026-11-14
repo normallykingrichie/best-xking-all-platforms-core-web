@@ -8,7 +8,7 @@
   var C = window.XK_CONFIG || {};
   var CONFIG = {
     linktreeUrl: C.linktreeUrl || 'https://xking-supremax-studios-linktree.netlify.app/',
-    quizReward: 10,
+    quizRewards: [10, 7, 5],
     pollMs: 6000
   };
   var K = { theme: 'xk1.theme', remember: 'xk.remember', adminMode: 'xk.adminMode' };
@@ -179,15 +179,21 @@
       var row = r.data && r.data[0];
       if (!row) { S.quiz = null; return; }
       var prev = S.quiz && S.quiz.id === row.id ? S.quiz : null;
-      var q = { id: row.id, startsAt: Date.parse(row.starts_at), status: row.status, question: prev ? prev.question : null, key: null, answers: [], mine: null };
+      var q = { id: row.id, startsAt: Date.parse(row.starts_at), status: row.status, closedAt: row.closed_at ? Date.parse(row.closed_at) : 0,
+        question: prev ? prev.question : null, key: null, answers: [], mine: null, tries: 0, winners: [] };
       S.quiz = q;
       var jobs = [];
       if (!q.question && now() >= q.startsAt - 500) jobs.push(loadQuestion(q));
+      jobs.push(sb.from('quiz_winners').select('place,reward,username').eq('quiz_id', q.id).order('place', { ascending: true }).then(function (w) {
+        if (!w.error) q.winners = w.data;
+      }));
       if (S.me) {
-        jobs.push(sb.from('quiz_answers').select('id,user_id,answer,result,created_at').eq('quiz_id', q.id).then(function (a) {
+        jobs.push(sb.from('quiz_answers').select('id,user_id,answer,result,place,reward,created_at').eq('quiz_id', q.id).order('created_at', { ascending: true }).then(function (a) {
           if (a.error) throw a.error;
-          var rows = a.data.map(function (x) { return { id: x.id, userId: x.user_id, text: x.answer, result: x.result, ts: Date.parse(x.created_at) }; });
-          q.mine = rows.filter(function (x) { return x.userId === S.me.id; })[0] || null;
+          var rows = a.data.map(function (x) { return { id: x.id, userId: x.user_id, text: x.answer, result: x.result, place: x.place, reward: x.reward, ts: Date.parse(x.created_at) }; });
+          var own = rows.filter(function (x) { return x.userId === S.me.id; });
+          q.tries = own.length;
+          q.mine = own.filter(function (x) { return x.result === 'correct' || x.result === 'late'; })[0] || own[own.length - 1] || null;
           if (adminOn()) q.answers = rows;
         }));
       }
@@ -197,6 +203,8 @@
   }
   function quizPhase(q) {
     if (!q) return 'none';
+    /* When all 3 places are taken the quiz disappears by itself 3 minutes later. */
+    if (q.status === 'closed' && q.winners && q.winners.length >= 3 && q.closedAt && now() > q.closedAt + 180000) return 'none';
     if (q.status === 'closed') return 'closed';
     if (now() < q.startsAt) return 'scheduled';
     return q.question ? 'live' : 'starting';
@@ -344,7 +352,7 @@
         if (old && old.indexOf('/avatars/' + S.me.id + '/') > 0) { sb.storage.from('avatars').remove([old.split('/avatars/')[1]]).catch(function () {}); }
       });
     },
-    answer: function (quizId, text) { return rpc('submit_answer', { p_quiz: quizId, p_answer: text }).then(loadQuiz).then(function () { emit('data'); }); },
+    answer: function (quizId, text) { return rpc('submit_answer', { p_quiz: quizId, p_answer: text }).then(function (r) { return loadQuiz().then(function () { emit('data'); return r; }); }); },
     buy: function (id) { return rpc('purchase_item', { p_item: id }).then(refresh); },
     sendReport: function (o) {
       return sb.from('reports').insert({ kind: o.kind, title: o.title, details: o.details, external_link: o.link || null }).then(must).then(loadWallet).then(function () { emit('data'); });
@@ -598,6 +606,137 @@
     drawSkyline(cv);
   }
 
+  /* ---------- living city backdrop: day or night to match the theme, with cars driving past ---------- */
+  function mountCityBackdrop() {
+    if ($('#cityBackdrop')) return;
+    var cv = document.createElement('canvas');
+    cv.id = 'cityBackdrop'; cv.setAttribute('aria-hidden', 'true');
+    document.body.insertBefore(cv, document.body.firstChild);
+    var ctx = cv.getContext('2d'); if (!ctx) return;
+    var base = document.createElement('canvas'), bg = base.getContext('2d');
+    var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    var W = 0, H = 0, sc = 1, roadY = 0, roadH = 0, dark = false, stars = [], clouds = [], cars = [], raf = 0, last = 0, lastW = 0, lastH = 0;
+    var CAR_DAY = ['#D64545', '#2F6FDB', '#F2B632', '#F4F4F4', '#2E9E6B', '#5B6573', '#E07A2F'];
+    var CAR_NIGHT = ['#8C2B2B', '#1F4A96', '#9A7620', '#C9CED6', '#1F6B49', '#39414D', '#97511F'];
+
+    function rr(g, x, y, w, h, r) {
+      g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+    }
+    function build() {
+      dark = isDark();
+      var dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+      W = Math.max(320, window.innerWidth); H = Math.max(400, window.innerHeight); sc = dpr; lastW = W; lastH = H;
+      cv.width = base.width = Math.round(W * sc); cv.height = base.height = Math.round(H * sc);
+      var g = bg; g.setTransform(sc, 0, 0, sc, 0, 0);
+      roadH = Math.max(36, Math.min(56, H * .065)); roadY = H - roadH;
+      var sky = g.createLinearGradient(0, 0, 0, H);
+      if (dark) { sky.addColorStop(0, '#040810'); sky.addColorStop(.55, '#0A1424'); sky.addColorStop(1, '#122038'); }
+      else { sky.addColorStop(0, '#BFD9F2'); sky.addColorStop(.55, '#E4EEF8'); sky.addColorStop(1, '#F7EEDD'); }
+      g.fillStyle = sky; g.fillRect(0, 0, W, H);
+      var R = rng(7731);
+      if (dark) {
+        g.fillStyle = '#EEF3FF'; g.beginPath(); g.arc(W * .82, H * .14, Math.min(26, W * .04), 0, 6.2832); g.fill();
+        g.fillStyle = '#0A1424'; g.beginPath(); g.arc(W * .82 + 9, H * .14 - 4, Math.min(23, W * .036), 0, 6.2832); g.fill();
+        var glow = g.createRadialGradient(W * .82, H * .14, 8, W * .82, H * .14, 150);
+        glow.addColorStop(0, 'rgba(190,210,255,.22)'); glow.addColorStop(1, 'rgba(190,210,255,0)'); g.fillStyle = glow; g.fillRect(0, 0, W, H * .6);
+        stars = []; var n = Math.round(W * H / 9000);
+        for (var i = 0; i < n; i++) stars.push({ x: R() * W, y: R() * H * .55, r: .5 + R() * 1.1, p: R() * 6.28, s: .6 + R() * 1.6 });
+      } else {
+        var sun = g.createRadialGradient(W * .8, H * .2, 6, W * .8, H * .2, 260);
+        sun.addColorStop(0, 'rgba(255,246,214,.95)'); sun.addColorStop(.25, 'rgba(255,236,180,.45)'); sun.addColorStop(1, 'rgba(255,236,180,0)');
+        g.fillStyle = sun; g.fillRect(0, 0, W, H * .7);
+        g.fillStyle = '#FFF3C9'; g.beginPath(); g.arc(W * .8, H * .2, Math.min(30, W * .045), 0, 6.2832); g.fill();
+        stars = [];
+        clouds = []; var cn = Math.max(3, Math.round(W / 300));
+        for (var c = 0; c < cn; c++) clouds.push({ x: R() * W, y: H * (.08 + R() * .26), s: .6 + R() * .8, v: 4 + R() * 6 });
+      }
+      var LAY = dark
+        ? [{ h0: .22, h1: .46, w0: 34, w1: 80, col: '#0E1A2D' }, { h0: .14, h1: .32, w0: 40, w1: 96, col: '#0B1424' }, { h0: .07, h1: .18, w0: 46, w1: 110, col: '#080F1B' }]
+        : [{ h0: .22, h1: .46, w0: 34, w1: 80, col: '#C6D4E6' }, { h0: .14, h1: .32, w0: 40, w1: 96, col: '#AEBED4' }, { h0: .07, h1: .18, w0: 46, w1: 110, col: '#97A9C3' }];
+      LAY.forEach(function (L, li) {
+        var x = -20 - R() * 30;
+        while (x < W + 20) {
+          var w = L.w0 + R() * (L.w1 - L.w0), h = H * (L.h0 + R() * (L.h1 - L.h0)), top = roadY - h;
+          g.fillStyle = L.col; g.fillRect(x, top, w, h + 2);
+          if (R() < .35) { var tw = w * .5, th = 10 + R() * 28; g.fillRect(x + (w - tw) / 2, top - th, tw, th + 1); if (R() < .4) g.fillRect(x + w / 2 - 1, top - th - 16, 2, 16); }
+          for (var yy = top + 8; yy < roadY - 8; yy += 11) {
+            for (var xx = x + 5; xx < x + w - 7; xx += 9) {
+              var r = R();
+              if (dark) { if (r < .22) { g.fillStyle = r < .12 ? '#FFD27A' : r < .18 ? '#FFE9B0' : '#9CD3FF'; g.globalAlpha = .55 + li * .15; g.fillRect(xx, yy, 4, 6); g.globalAlpha = 1; } }
+              else if (r < .3) { g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(xx, yy, 4, 6); }
+            }
+          }
+          x += w * (.8 + R() * .15);
+        }
+      });
+      /* road */
+      g.fillStyle = dark ? '#070C14' : '#7E8998'; g.fillRect(0, roadY, W, roadH);
+      g.fillStyle = dark ? '#1B2638' : '#A7B1BE'; g.fillRect(0, roadY, W, 3);
+      g.fillStyle = dark ? 'rgba(255,214,120,.55)' : 'rgba(255,255,255,.75)';
+      for (var dx = 0; dx < W; dx += 46) g.fillRect(dx, roadY + roadH / 2 - 1, 22, 2);
+      /* cars */
+      var count = Math.max(5, Math.min(12, Math.round(W / 170))), pal = dark ? CAR_NIGHT : CAR_DAY;
+      var old = cars; cars = [];
+      for (var k = 0; k < count; k++) {
+        var dir = k % 2 ? -1 : 1, hh = roadH * (.36 + (R() * .08));
+        cars.push({ x: old[k] ? old[k].x * (W / (old[k].W || W)) : R() * W, W: W, dir: dir, y: roadY + roadH * (dir > 0 ? .30 : .72), h: hh, len: hh * (2.3 + R() * .5), v: (38 + R() * 46) * dir, col: pal[(R() * pal.length) | 0] });
+      }
+    }
+    function car(c) {
+      ctx.save(); ctx.translate(c.x + c.len / 2, c.y); ctx.scale(c.dir, 1);
+      var L = c.len, h = c.h, x0 = -L / 2;
+      if (dark) {
+        var beam = ctx.createLinearGradient(x0 + L, 0, x0 + L + h * 4.2, 0);
+        beam.addColorStop(0, 'rgba(255,240,190,.5)'); beam.addColorStop(1, 'rgba(255,240,190,0)');
+        ctx.fillStyle = beam; ctx.beginPath(); ctx.moveTo(x0 + L - 2, -h * .38); ctx.lineTo(x0 + L + h * 4.2, -h * 1.0); ctx.lineTo(x0 + L + h * 4.2, h * .18); ctx.lineTo(x0 + L - 2, -h * .12); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(x0 + 2, h * .02, L - 4, 2);
+      ctx.fillStyle = c.col; rr(ctx, x0, -h * .62, L, h * .6, h * .16); ctx.fill();
+      rr(ctx, x0 + L * .2, -h * 1.02, L * .52, h * .5, h * .16); ctx.fill();
+      ctx.fillStyle = dark ? '#6F87A8' : '#CFE4F7';
+      rr(ctx, x0 + L * .26, -h * .96, L * .18, h * .36, 2); ctx.fill(); rr(ctx, x0 + L * .48, -h * .96, L * .19, h * .36, 2); ctx.fill();
+      ctx.fillStyle = '#10151D';
+      ctx.beginPath(); ctx.arc(x0 + L * .24, -h * .02, h * .17, 0, 6.2832); ctx.fill(); ctx.beginPath(); ctx.arc(x0 + L * .76, -h * .02, h * .17, 0, 6.2832); ctx.fill();
+      ctx.fillStyle = dark ? '#FFF0BE' : '#FFF8DC'; ctx.fillRect(x0 + L - 3, -h * .5, 3, h * .14);
+      ctx.fillStyle = '#FF3B30'; ctx.fillRect(x0, -h * .5, 2.5, h * .14);
+      ctx.restore();
+    }
+    function draw(dt, t) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(base, 0, 0); ctx.setTransform(sc, 0, 0, sc, 0, 0);
+      var i;
+      if (dark) {
+        ctx.fillStyle = '#FFFFFF';
+        for (i = 0; i < stars.length; i++) { var s = stars[i]; ctx.globalAlpha = .35 + .5 * Math.abs(Math.sin(t / 1000 * s.s + s.p)); ctx.fillRect(s.x, s.y, s.r, s.r); }
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,.8)';
+        for (i = 0; i < clouds.length; i++) {
+          var c = clouds[i]; c.x += c.v * dt; if (c.x > W + 120) c.x = -120;
+          ctx.beginPath(); ctx.ellipse(c.x, c.y, 46 * c.s, 13 * c.s, 0, 0, 6.2832); ctx.ellipse(c.x + 28 * c.s, c.y - 8 * c.s, 30 * c.s, 12 * c.s, 0, 0, 6.2832); ctx.ellipse(c.x - 26 * c.s, c.y - 4 * c.s, 26 * c.s, 10 * c.s, 0, 0, 6.2832); ctx.fill();
+        }
+      }
+      for (i = 0; i < cars.length; i++) {
+        var k = cars[i]; k.x += k.v * dt;
+        if (k.v > 0 && k.x > W + 30) k.x = -k.len - 30; else if (k.v < 0 && k.x < -k.len - 30) k.x = W + 30;
+        car(k);
+      }
+    }
+    function frame(t) {
+      raf = requestAnimationFrame(frame);
+      if (t - last < 33) return;
+      var dt = Math.min(.1, (t - last) / 1000); last = t; draw(dt, t);
+    }
+    function start() { cancelAnimationFrame(raf); if (reduce || document.hidden) { draw(0, 0); return; } last = performance.now(); raf = requestAnimationFrame(frame); }
+    var rs = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(rs);
+      rs = setTimeout(function () { if (window.innerWidth !== lastW || Math.abs(window.innerHeight - lastH) > 160) { build(); start(); } }, 200);
+    });
+    document.addEventListener('visibilitychange', start);
+    on('theme', function () { build(); start(); });
+    build(); start();
+  }
+
   /* ---------- avatar ---------- */
   function avatar(u, size) {
     var cls = 'avatar avatar-' + (size || 'sm');
@@ -805,6 +944,7 @@
   function boot() {
     var host = $('#themeHost'); if (host) mountThemeSwitch(host); else applyTheme(themeMode());
     mountAdminFab();
+    mountCityBackdrop();
     mountSkyline($('#skyline'));
     on('theme', function () { $$('canvas[data-sky]').forEach(drawSkyline); });
     urlProblem();

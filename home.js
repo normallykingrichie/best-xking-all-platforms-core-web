@@ -123,25 +123,39 @@
 
   /* ----- games ----- */
   function remaining(q) { return Math.max(0, Math.ceil((q.startsAt - XK.now()) / 1000)); }
+  function ord(n) { return ['1st', '2nd', '3rd'][n - 1] || n + 'th'; }
+  function slotsHtml(q) {
+    var R = XK.CONFIG.quizRewards;
+    return '<ol class="slots" aria-label="Winner places">' + [1, 2, 3].map(function (i) {
+      var w = (q.winners || []).filter(function (x) { return x.place === i; })[0];
+      return '<li class="' + (w ? 'is-won' : '') + '"><span class="slot-place">' + ord(i) + '</span><span class="slot-name">' + (w ? esc(w.username) : 'Open') + '</span><span class="slot-coins tnum">+' + R[i - 1] + '</span></li>';
+    }).join('') + '</ol>';
+  }
   function triviaInner() {
-    var q = S.quiz, ph = XK.quizPhase(q), u = user(), mine = q && q.mine;
-    var h = '<header><span class="chip">ACT Game</span><h2 class="display">Trivia Quiz</h2><p class="muted">Live questions from the operators. A correct answer earns <strong>' + XK.CONFIG.quizReward + ' Coins</strong>.</p></header>';
-    if (ph === 'none') h += '<div class="state"><p class="big">No quiz right now.</p><p class="muted">Turn on notifications and you get a 20-second heads-up before the next one.</p></div>';
-    else if (ph === 'scheduled') h += '<div class="state" role="status"><p class="big">Trivia Quiz will start in <b data-countdown>' + remaining(q) + '</b> Seconds!</p><p class="muted">Get ready. The question appears here the moment the countdown ends.</p></div>';
+    var q = S.quiz, ph = XK.quizPhase(q), u = user(), mine = q && q.mine, R = XK.CONFIG.quizRewards;
+    var h = '<header><span class="chip">ACT Game</span><h2 class="display">Trivia Quiz</h2><p class="muted">A race! The first <strong>3</strong> correct answers win: <strong>' + R[0] + '</strong>, <strong>' + R[1] + '</strong> and <strong>' + R[2] + '</strong> Coins. A wrong answer? Just try again.</p></header>';
+    if (ph === 'none') return h + '<div class="state"><p class="big">No quiz right now.</p><p class="muted">Turn on notifications and you get a 20-second heads-up before the next one.</p></div>' + notifySwitch(u);
+    if (ph === 'scheduled') h += '<div class="state" role="status"><p class="big">Trivia Quiz will start in <b data-countdown>' + remaining(q) + '</b> Seconds!</p><p class="muted">Get ready. The question appears here the moment the countdown ends.</p></div>';
     else if (ph === 'starting') h += '<div class="state" role="status"><p class="big">Starting now...</p><p class="muted">Loading the question.</p></div>';
-    else if (ph === 'closed') h += '<div class="state"><p class="big">This quiz is closed.</p><p class="muted">Watch for the next one.</p></div>' + (mine ? resultLine(mine) : '');
     else {
-      h += '<div class="state"><p class="eyebrow">Live question</p><p class="quiz-q">' + esc(q.question) + '</p></div>';
-      if (!u) h += '<p class="lock-note">' + LOCK + 'Sign in to answer and save your Coins.</p><div><a class="btn-primary btn-sm" href="login.html">Sign in</a></div>';
-      else if (mine) h += resultLine(mine);
-      else h += '<form class="answer-form" data-form="answer"><div class="field"><label for="ans">Your answer</label><input id="ans" type="text" maxlength="120" required autocomplete="off" value="' + esc(st.answer) + '"></div><button type="submit" class="btn-primary" style="align-self:end">Submit answer</button></form><p class="hint">You can answer once. An operator checks every answer.</p>';
+      h += '<div class="state"><p class="eyebrow">' + (ph === 'live' ? 'Live question' : 'Quiz finished') + '</p><p class="quiz-q">' + esc(q.question || '') + '</p></div>' + slotsHtml(q);
+      if (ph === 'closed') {
+        h += mine && mine.result === 'correct' ? resultLine(mine) : '<p class="muted">' + (q.winners.length >= 3 ? 'All 3 places were taken. This card clears itself in a few minutes.' : 'This quiz is closed. Watch for the next one.') + '</p>';
+      } else if (!u) h += '<p class="lock-note">' + LOCK + 'Sign in to answer and win Coins.</p><div><a class="btn-primary btn-sm" href="login.html">Sign in</a></div>';
+      else if (mine && (mine.result === 'correct' || mine.result === 'late' || mine.result === 'pending')) h += resultLine(mine);
+      else {
+        if (mine && mine.result === 'wrong') h += '<p><span class="pill pill-bad">Not quite</span> <span class="muted">"' + esc(mine.text) + '" was not it. Try again!</span></p>';
+        h += '<form class="answer-form" data-form="answer"><div class="field"><label for="ans">Your answer</label><input id="ans" type="text" maxlength="120" required autocomplete="off" value="' + esc(st.answer) + '"></div><button type="submit" class="btn-primary" style="align-self:end">Submit answer</button></form><p class="hint">Be quick. Places are given in the order answers are checked.</p>';
+      }
     }
-    if (u) h += '<label class="switch"><input type="checkbox" data-act="notif"' + (u.notifyQuiz ? ' checked' : '') + '><span class="track"></span><span>Notify me when a quiz is coming</span></label>';
-    return h;
+    return h + notifySwitch(u);
+  }
+  function notifySwitch(u) {
+    return u ? '<label class="switch"><input type="checkbox" data-act="notif"' + (u.notifyQuiz ? ' checked' : '') + '><span class="track"></span><span>Notify me when a quiz is coming</span></label>' : '';
   }
   function resultLine(a) {
-    if (a.result === 'correct') return '<p><span class="pill pill-ok">Correct, +' + XK.CONFIG.quizReward + ' Coins</span> <span class="muted">Your answer: ' + esc(a.text) + '</span></p>';
-    if (a.result === 'wrong') return '<p><span class="pill pill-bad">Not this time</span> <span class="muted">Your answer: ' + esc(a.text) + '</span></p>';
+    if (a.result === 'correct') return '<p><span class="pill pill-ok">You took ' + ord(a.place) + ' place, +' + a.reward + ' Coins</span> <span class="muted">Your answer: ' + esc(a.text) + '</span></p>';
+    if (a.result === 'late') return '<p><span class="pill">Right, but too late</span> <span class="muted">All 3 places were already taken.</span></p>';
     return '<p><span class="pill">Waiting for an operator</span> <span class="muted">Your answer: ' + esc(a.text) + '</span></p>';
   }
   function viewGames() {
@@ -254,15 +268,17 @@
       var names = S.adm.names || {};
       answers = '<div class="panel"><h3>Answers (' + q.answers.length + ')</h3>' + (q.answers.length ? '<div class="rows">' + q.answers.map(function (a) {
         var act = a.result === 'pending'
-          ? '<div class="photo-actions"><button type="button" class="btn-primary btn-sm" data-act="mark" data-id="' + a.id + '" data-result="correct">Correct +' + XK.CONFIG.quizReward + '</button><button type="button" class="btn-ghost btn-sm" data-act="mark" data-id="' + a.id + '" data-result="wrong">Wrong</button></div>'
-          : '<span class="pill ' + (a.result === 'correct' ? 'pill-ok' : 'pill-bad') + '">' + (a.result === 'correct' ? 'Correct' : 'Wrong') + '</span>';
+          ? '<div class="photo-actions"><button type="button" class="btn-primary btn-sm" data-act="mark" data-id="' + a.id + '" data-result="correct">Correct</button><button type="button" class="btn-ghost btn-sm" data-act="mark" data-id="' + a.id + '" data-result="wrong">Wrong</button></div>'
+          : a.result === 'wrong'
+            ? '<div class="photo-actions"><span class="pill pill-bad">Wrong</span><button type="button" class="btn-ghost btn-sm" data-act="mark" data-id="' + a.id + '" data-result="correct">It is correct</button></div>'
+            : '<span class="pill ' + (a.result === 'correct' ? 'pill-ok' : '') + '">' + (a.result === 'correct' ? ord(a.place) + ' place, +' + a.reward : 'Late') + '</span>';
         return '<div class="row"><div><strong>' + esc(names[a.userId] || 'Deleted user') + '</strong><span class="muted">' + esc(a.text) + ' &middot; ' + esc(XK.fmtTime(a.ts)) + '</span></div>' + act + '</div>';
       }).join('') + '</div>' : '<p class="empty">No answers yet.</p>') + '</div>';
     }
     return '<div class="panel"><h2 class="display">Post a Trivia Quiz</h2>' +
       '<form class="form-stack" data-form="quiz"><fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:16px" ' + (ph === 'scheduled' ? 'disabled' : '') + '>' +
       '<div class="field"><label for="aq">Question</label><textarea id="aq" required maxlength="400" placeholder="Which block drops the most Coins in XKing City?">' + esc(st.quizForm.q) + '</textarea></div>' +
-      '<div class="field"><label for="akey">Answer key (only staff see this)</label><input id="akey" type="text" maxlength="120" value="' + esc(st.quizForm.key) + '"><p class="hint">You decide which answers are correct. Posting a new quiz replaces the current one.</p></div>' +
+      '<div class="field"><label for="akey">Answer key (recommended, only staff see this)</label><input id="akey" type="text" maxlength="120" value="' + esc(st.quizForm.key) + '"><p class="hint">With a key, answers are checked instantly and the first 3 correct players win 10, 7 and 5 Coins. Use | for more than one accepted answer, like Paris|City of Light. Without a key you mark answers by hand, and the order you mark decides the places. Posting a new quiz replaces the current one.</p></div>' +
       '<div><button type="submit" class="btn-primary">Post quiz</button></div></fieldset>' +
       '<p class="hint">After you press Post, the quiz waits 20 seconds. Players with notifications on get: Trivia Quiz will start in 20 Seconds!</p></form></div>' + status + answers;
   }
@@ -638,7 +654,12 @@
     try {
       if (f === 'answer') {
         if (!user() || !S.quiz) return;
-        run(api.answer(S.quiz.id, st.answer.trim()), 'Answer sent. An operator will check it.', function () { st.answer = ''; });
+        if (btn) btn.disabled = true;
+        api.answer(S.quiz.id, st.answer.trim()).then(function (r) {
+          st.answer = '';
+          XK.toast(r.result === 'correct' ? 'You took ' + ord(r.place) + ' place! +' + r.reward + ' Coins' : r.result === 'wrong' ? 'Not quite. Try again!' : 'Answer sent. An operator will check it.', r.result === 'wrong' ? 'error' : 'ok');
+          render();
+        }, function (er) { if (btn) btn.disabled = false; fail(er); });
       } else if (f === 'quiz') {
         run(api.postQuiz(st.quizForm.q.trim(), st.quizForm.key.trim()), 'Quiz queued. It goes live in 20 seconds.', function () { st.quizForm = { q: '', key: '' }; });
       } else if (f === 'post') {
@@ -661,7 +682,7 @@
   function quizKey() {
     var q = S.quiz, u = user();
     if (!q) return 'none';
-    return q.id + ':' + XK.quizPhase(q) + ':' + (q.mine ? q.mine.result : '-') + ':' + q.answers.length + ':' + (q.question ? 1 : 0) + ':' + q.status;
+    return q.id + ':' + XK.quizPhase(q) + ':' + (q.mine ? q.mine.result + q.mine.id : '-') + ':' + q.answers.length + ':' + (q.winners ? q.winners.length : 0) + ':' + (q.question ? 1 : 0) + ':' + q.status;
   }
   function tick() {
     var q = S.quiz, ph = XK.quizPhase(q), u = user();
