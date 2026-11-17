@@ -13,8 +13,9 @@
     view: null, settingsTab: 'photo', adminTab: 'quiz', drafts: {}, replyOpen: {}, answer: '',
     quizForm: { q: '', key: '' }, postForm: { type: 'announcement', title: '', body: '', link: '', when: '' },
     reportForm: { kind: 'suggestion', title: '', details: '', link: '' },
-    acctFilter: '', crop: null, notified: '', phaseKey: '', refocus: '', busy: false
+    acctFilter: '', prod: null, prodBusy: false, crop: null, notified: '', phaseKey: '', refocus: '', busy: false
   };
+  st.prod = newProd();
   var viewEl = $('#view'), navEl = $('#nav'), acctEl = $('#acctArea');
 
   function user() { return XK.me(); }
@@ -37,12 +38,13 @@
     navEl.innerHTML = navItems().map(function (v) {
       return '<button type="button" class="tab" data-act="nav" data-view="' + v + '"' + (st.view === v ? ' aria-current="page"' : '') + '>' + NAV[v] + '</button>';
     }).join('');
+    var tree = '<a class="btn-tree-sm" href="' + esc(XK.CONFIG.linktreeUrl) + '" target="_blank" rel="noopener noreferrer">' + TREE + '<span>Go to LinkTree</span></a>';
     if (u) {
-      acctEl.innerHTML = XK.avatar(u, 'sm') + '<button type="button" class="btn-ghost btn-sm" data-act="nav" data-view="settings"' + (st.view === 'settings' ? ' aria-current="page"' : '') + '><span><span class="lbl-long">Account </span>Settings</span></button>';
+      acctEl.innerHTML = tree + '<button type="button" class="btn-ghost btn-sm" data-act="nav" data-view="inventory"' + (st.view === 'inventory' ? ' aria-current="page"' : '') + '>Inventory</button>' + XK.avatar(u, 'sm') + '<button type="button" class="btn-ghost btn-sm" data-act="nav" data-view="settings"' + (st.view === 'settings' ? ' aria-current="page"' : '') + '><span><span class="lbl-long">Account </span>Settings</span></button>';
     } else if (!S.ready) {
-      acctEl.innerHTML = '';
+      acctEl.innerHTML = tree;
     } else {
-      acctEl.innerHTML = '<a class="btn-ghost btn-sm" href="login.html">Sign in</a><a class="btn-primary btn-sm" href="register.html">Sign up</a>';
+      acctEl.innerHTML = tree + '<a class="btn-ghost btn-sm" href="login.html">Sign in</a><a class="btn-primary btn-sm" href="register.html">Sign up</a>';
     }
   }
 
@@ -158,22 +160,57 @@
     if (a.result === 'late') return '<p><span class="pill">Right, but too late</span> <span class="muted">All 3 places were already taken.</span></p>';
     return '<p><span class="pill">Waiting for an operator</span> <span class="muted">Your answer: ' + esc(a.text) + '</span></p>';
   }
+  function webzombiteCard() {
+    var u = user();
+    return '<article class="game-card wz-card" id="wzCard"><header><div class="chips"><span class="chip">ACT Game</span><span class="chip chip-dev">Under Development</span></div><h2 class="display">Webzombite</h2>' +
+      '<p class="muted">The apocalypse hit XKing Supreme Large City. Chop, mine, loot and build a base in a 500m x 500m first-person map, and hold out against zombies that never stop coming. Your progress saves automatically.</p></header>' +
+      '<div class="wz-art" aria-hidden="true"><span></span><span></span><span></span></div>' +
+      '<div><button type="button" class="btn-primary" data-act="wz-open">' + (u ? (S.beta ? 'Play the beta' : 'Enter beta password') : 'Sign in for beta access') + '</button></div>' +
+      '<p class="hint">Beta build. It may change or reset while we finish it.</p></article>';
+  }
   function viewGames() {
     return greet() + '<div class="section-head"><h2 class="display">ACT Games</h2><p class="muted">Play, earn Coins, climb the city.</p></div>' +
-      '<div class="games-grid"><article class="game-card" id="triviaCard">' + triviaInner() + '</article>' +
+      '<div class="games-grid"><article class="game-card" id="triviaCard">' + triviaInner() + '</article>' + webzombiteCard() +
       '<article class="game-card is-soon" role="group" aria-label="Tycoon City, coming soon"><div class="soon-blur" aria-hidden="true"><header><span class="chip">ACT Game</span><h2 class="display">Tycoon City</h2></header><p class="muted">Build, earn and expand your own district.</p></div><div class="soon-label" aria-hidden="true">Coming soon...</div></article></div>';
   }
 
   /* ----- exchange ----- */
   function priceText(it) { return nf(it.price) + ' ' + (it.currency === 'gold' ? 'Gold Coins' : 'Coins'); }
+  function inkFor(hex) {
+    var h = /^#[0-9a-f]{6}$/i.test(hex) ? hex : '#E3B02A', r = parseInt(h.slice(1, 3), 16), g = parseInt(h.slice(3, 5), 16), b = parseInt(h.slice(5, 7), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#111111' : '#FFFFFF';
+  }
+  function ribbonHtml(text, color) {
+    if (!text) return '';
+    var c = /^#[0-9a-f]{6}$/i.test(color) ? color : '#E3B02A';
+    return '<span class="ribbon" style="background:' + c + ';color:' + inkFor(c) + '">' + esc(text) + '</span>';
+  }
+  function mediaHtml(url) {
+    return '<div class="shop-media">' + (url ? '<img src="' + esc(url) + '" alt="" loading="lazy">' : '<span class="shop-ph" aria-hidden="true">' + TREE + '</span>') + '</div>';
+  }
+  function stockHtml(it) {
+    if (it.stock == null) return '';
+    return it.stock <= 0 ? '<span class="pill pill-bad">Sold out</span>' : '<span class="pill">' + nf(it.stock) + ' left</span>';
+  }
+  function priceHtml(it) {
+    var cur = it.currency === 'gold' ? 'Gold Coins' : 'Coins';
+    return (it.discount_pct > 0 && it.base_price ? '<s class="was">' + nf(it.base_price) + '</s> ' : '') + nf(it.price) + ' ' + cur + (it.discount_pct > 0 ? ' <span class="off">-' + it.discount_pct + '%</span>' : '');
+  }
+  function shopCard(it, opts) {
+    opts = opts || {};
+    var soldOut = it.stock != null && it.stock <= 0;
+    return '<article class="panel shop-card" data-item="' + esc(it.id) + '"><div class="shop-top">' + mediaHtml(it.image_url) + ribbonHtml(it.ribbon_text, it.ribbon_color) + '</div>' +
+      '<div class="chips"><span class="chip">' + (it.kind === 'discord_role' ? 'Discord role' : it.kind === 'product' ? 'Product' : 'Special') + '</span>' + stockHtml(it) + '</div>' +
+      '<h3>' + esc(it.name) + '</h3><p class="muted">' + esc(it.description) + '</p>' +
+      (it.redeem_hint ? '<p class="hint">After buying you will be asked for: ' + esc(it.redeem_hint) + '</p>' : '') +
+      '<p class="price tnum">' + priceHtml(it) + '</p>' +
+      (opts.preview ? '' : '<div><button type="button" class="btn-primary btn-sm" data-act="buy"' + (soldOut ? ' disabled' : '') + '>' + (soldOut ? 'Sold out' : user() ? 'Exchange' : 'Sign in to exchange') + '</button></div>') + '</article>';
+  }
   function viewExchange() {
     var items = S.shop;
-    return greet() + '<div class="section-head"><h2 class="display">Exchange</h2><p class="muted">Spend your Coins on useful things.</p></div>' +
+    return greet() + '<div class="section-head"><div><h2 class="display">Exchange</h2><p class="muted">Spend your Coins on useful things. Every purchase gives you a receipt with a private 10-digit code.</p></div><button type="button" class="btn-ghost" data-act="redeem">Redeem Code</button></div>' +
       (items.length
-        ? '<div class="shop-grid">' + items.map(function (it) {
-          return '<article class="panel shop-card" data-item="' + esc(it.id) + '"><span class="chip">' + (it.kind === 'discord_role' ? 'Discord role' : 'Special') + '</span><h3>' + esc(it.name) + '</h3><p class="muted">' + esc(it.description) + '</p>' +
-            '<p class="price tnum">' + esc(priceText(it)) + '</p><div><button type="button" class="btn-primary btn-sm" data-act="buy">' + (user() ? 'Exchange' : 'Sign in to exchange') + '</button></div></article>';
-        }).join('') + '</div>'
+        ? '<div class="shop-grid">' + items.map(function (it) { return shopCard(it); }).join('') + '</div>'
         : '<div class="state"><p class="big">No products or anythings to be exchange...</p><p class="muted">Check back soon. New things will appear here.</p></div>');
   }
 
@@ -198,7 +235,7 @@
   /* ----- account settings ----- */
   function viewSettings() {
     var u = user();
-    var tabs = [['photo', 'Profile & Photo'], ['link', 'Link More Account'], ['inventory', 'Inventory']];
+    var tabs = [['photo', 'Profile & Photo'], ['link', 'Link More Account']];
     return greet() + '<div class="section-head"><h2 class="display">Account Settings</h2><p class="muted">' + esc(u.email || 'Signed in with a linked account') + '</p></div>' +
       '<div class="settings"><nav class="side-tabs" aria-label="Account settings">' + tabs.map(function (t) {
         return '<button type="button" class="side-tab" data-act="settings-tab" data-tab="' + t[0] + '" aria-current="' + (st.settingsTab === t[0]) + '">' + t[1] + '</button>';
@@ -207,7 +244,6 @@
   }
   function settingsPanel(u) {
     if (st.settingsTab === 'link') return panelLink(u);
-    if (st.settingsTab === 'inventory') return panelInventory(u);
     return panelPhoto(u);
   }
   function panelPhoto(u) {
@@ -235,23 +271,34 @@
     return '<h2 class="display">Link More Account</h2><p class="muted">Link your accounts so signing in with any of them opens the same profile and the same Coins. Linking Discord also lets you buy Discord roles and tags.</p>' +
       (dis ? '' : '<div class="warn-red" role="alert"><strong>Warning</strong><p>' + esc(XK.WARN_TEXT) + '</p></div>') + '<div class="rows">' + rows + '</div>';
   }
-  function panelInventory(u) {
-    var led = S.ledger;
-    var ord = S.orders.filter(function (o) { return o.status !== 'refunded'; });
-    var stTxt = { pending: 'Waiting for your Discord role', fulfilled: 'Delivered' };
-    return '<h2 class="display">Inventory</h2><div class="inv-grid"><div class="bal"><span>Coins</span><strong>' + nf(u.coins) + '</strong></div><div class="bal bal-gold"><span>Gold Coins</span><strong>' + nf(u.gold) + '</strong></div></div>' +
-      (u.vip ? '<p><span class="badge badge-vip">VIP Citizen</span> <span class="muted">Permanent. Thank you for supporting XKing!</span></p>' : '') +
-      '<div class="stack"><h3>Items</h3>' + (ord.length ? '<div class="rows">' + ord.map(function (o) { return '<div class="row"><div><strong>' + esc(o.shop_items ? o.shop_items.name : o.item_id) + '</strong><span class="muted">' + esc(stTxt[o.status] || o.status) + ' &middot; ' + esc(XK.fmtDate(Date.parse(o.created_at))) + '</span></div></div>'; }).join('') + '</div>' : '<p class="empty">Nothing here yet. Roles, tags and properties you exchange for Coins will show up here.</p>') + '</div>' +
-      '<div class="stack"><h3>Recent activity</h3>' + (led.length ? '<ul class="ledger">' + led.map(function (l) {
+  var RSTAT = { pending: 'Not redeemed yet', redeemed: 'Redeemed. Waiting for staff', fulfilled: 'Delivered' };
+  function receiptHtml(o) {
+    var name = o.shop_items ? o.shop_items.name : o.item_id, cur = o.currency === 'gold' ? 'Gold Coins' : 'Coins';
+    return '<article class="receipt" data-oid="' + o.id + '"><div class="receipt-head"><strong>RECEIPT</strong><span class="pill ' + (o.status === 'fulfilled' ? 'pill-ok' : '') + '">' + esc(RSTAT[o.status] || o.status) + '</span></div>' +
+      '<dl><div><dt>Item</dt><dd>' + esc(name) + '</dd></div><div><dt>Redeem code</dt><dd class="code tnum">' + esc(o.code || '') + '</dd></div>' +
+      '<div><dt>Username</dt><dd>' + esc(o.buyer_name || '') + (o.gifted_to_name ? ' <em class="gifted">*Gifted to ' + esc(o.gifted_to_name) + '*</em>' : '') + '</dd></div>' +
+      '<div><dt>Amount</dt><dd class="tnum">' + nf(o.price_paid) + ' ' + cur + '</dd></div><div><dt>Date</dt><dd>' + esc(XK.fmtDate(Date.parse(o.created_at))) + '</dd></div></dl>' +
+      '<p class="hint">Keep this code private. Only the holder of the receipt can redeem it.</p>' +
+      (o.redeem_username ? '<p class="hint">Redeemed for: <b>' + esc(o.redeem_username) + '</b></p>' : '') +
+      '<div class="photo-actions">' + (o.status === 'pending' ? '<button type="button" class="btn-primary btn-sm" data-act="redeem" data-code="' + esc(o.code || '') + '">Redeem</button><button type="button" class="btn-ghost btn-sm" data-act="gift">Gift</button>' : '') +
+      '<button type="button" class="btn-ghost btn-sm is-danger-text" data-act="receipt-delete">Remove</button></div></article>';
+  }
+  function viewInventory() {
+    var u = user(), led = S.ledger, rec = S.orders.filter(function (o) { return o.status !== 'refunded'; });
+    return greet() + '<div class="section-head"><div><h2 class="display">Inventory</h2><p class="muted">Everything you own.</p></div><button type="button" class="btn-ghost" data-act="redeem">Redeem Code</button></div>' +
+      '<div class="stack"><div class="panel"><div class="inv-grid"><div class="bal"><span>Coins</span><strong>' + nf(u.coins) + '</strong></div><div class="bal bal-gold"><span>Gold Coins</span><strong>' + nf(u.gold) + '</strong></div></div>' +
+      (u.vip ? '<p><span class="badge badge-vip">VIP Citizen</span> <span class="muted">Permanent. Thank you for supporting XKing!</span></p>' : '') + '</div>' +
+      '<div class="panel"><h3>Receipts</h3>' + (rec.length ? '<div class="receipts">' + rec.map(receiptHtml).join('') + '</div>' : '<p class="empty">No receipts yet. When you exchange something in the Exchange tab, your receipt shows up here.</p>') + '</div>' +
+      '<div class="panel"><h3>Recent activity</h3>' + (led.length ? '<ul class="ledger">' + led.map(function (l) {
         return '<li><span>' + esc(l.reason || 'Adjustment') + ' <span class="muted">&middot; ' + esc(XK.fmtDate(Date.parse(l.created_at))) + '</span></span><span class="' + (l.delta > 0 ? 'pos' : 'neg') + ' tnum">' + (l.delta > 0 ? '+' : '') + nf(l.delta) + ' ' + (l.currency === 'gold' ? 'Gold' : 'Coins') + '</span></li>';
-      }).join('') + '</ul>' : '<p class="empty">No activity yet. Earn your first Coins in ACT Games.</p>') + '</div>';
+      }).join('') + '</ul>' : '<p class="empty">No activity yet. Earn your first Coins in ACT Games.</p>') + '</div></div>';
   }
 
   /* ----- admin ----- */
   function viewAdmin() {
-    var tabs = [['quiz', 'Post Quiz'], ['post', 'Post Announcement or Event'], ['accounts', 'Accounts'], ['reports', 'Reports'], ['log', 'Audit log']];
+    var tabs = [['quiz', 'Post Quiz'], ['post', 'Post Announcement or Event'], ['accounts', 'Accounts'], ['reports', 'Reports'], ['shop', 'Shop Products Shows'], ['log', 'Audit log']];
     if (isLeader()) tabs.push(['staff', 'Staff']);
-    var body = st.adminTab === 'post' ? adminPost() : st.adminTab === 'accounts' ? adminAccounts() : st.adminTab === 'reports' ? adminReports() : st.adminTab === 'log' ? adminLog() : st.adminTab === 'staff' && isLeader() ? adminStaff() : adminQuiz();
+    var body = st.adminTab === 'post' ? adminPost() : st.adminTab === 'accounts' ? adminAccounts() : st.adminTab === 'reports' ? adminReports() : st.adminTab === 'log' ? adminLog() : st.adminTab === 'shop' ? adminShop() : st.adminTab === 'staff' && isLeader() ? adminStaff() : adminQuiz();
     return greet() + '<div class="section-head"><h2 class="display">Admin tools</h2><p class="muted">' + (isLeader() ? 'You are the Leader.' : 'Your admin session was approved by the Leader.') + ' Every action is written to the audit log.</p></div>' +
       '<div class="subtabs" role="group" aria-label="Admin sections">' + tabs.map(function (t) {
         return '<button type="button" class="subtab" data-act="admin-tab" data-tab="' + t[0] + '" aria-current="' + (st.adminTab === t[0]) + '">' + t[1] + '</button>';
@@ -331,6 +378,47 @@
         ['seen', 'done', 'dismissed'].filter(function (s) { return s !== r.status; }).map(function (s) { return '<button type="button" class="btn-ghost btn-sm" data-act="report-status" data-status="' + s + '">' + ({ seen: 'Mark seen', done: 'Mark done', dismissed: 'Dismiss' })[s] + '</button>'; }).join('') + '</div></div>';
     }).join('') + '</div>' : '<p class="empty">No reports yet.</p>') + '</div>';
   }
+  function newProd() { return { id: '', name: '', desc: '', price: '', currency: 'coins', discount: 0, image: '', ribbon: '', color: '#E3B02A', stock: '', hint: '', available: true }; }
+  function prodAsItem(f) {
+    var base = parseInt(f.price, 10) || 0, d = Math.min(95, Math.max(0, parseInt(f.discount, 10) || 0));
+    return { id: f.id || 'preview', name: f.name || 'Product name', description: f.desc || 'Description shows here.', kind: 'product', currency: f.currency, base_price: base, discount_pct: d,
+      price: Math.max(1, Math.floor(base * (100 - d) / 100)), image_url: f.image, ribbon_text: f.ribbon, ribbon_color: f.color, stock: f.stock === '' ? null : parseInt(f.stock, 10), redeem_hint: f.hint };
+  }
+  function hex2(n) { n = Math.max(0, Math.min(255, parseInt(n, 10) || 0)); return (n < 16 ? '0' : '') + n.toString(16).toUpperCase(); }
+  function rgbOf(hex) { return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)]; }
+  function adminShop() {
+    var f = st.prod, rgb = rgbOf(/^#[0-9a-f]{6}$/i.test(f.color) ? f.color : '#E3B02A');
+    function slider(id, label, v, col) { return '<label class="rgb-row"><span>' + label + '</span><input type="range" id="sp-' + id + '" min="0" max="255" step="1" value="' + v + '" style="accent-color:' + col + '"><output class="tnum" id="sp-' + id + 'o">' + v + '</output></label>'; }
+    var form = '<div class="panel"><h2 class="display">' + (f.id ? 'Edit product' : 'Add a product') + '</h2><div class="prod-layout"><form class="form-stack" id="prodForm" data-form="product" novalidate>' +
+      '<div class="field"><label for="sp-name">Title</label><input id="sp-name" type="text" maxlength="80" value="' + esc(f.name) + '"></div>' +
+      '<div class="field"><label for="sp-desc">Description</label><textarea id="sp-desc" rows="3" maxlength="600">' + esc(f.desc) + '</textarea></div>' +
+      '<div class="two"><div class="field"><label for="sp-price">Price (before discount)</label><input id="sp-price" type="number" min="1" step="1" inputmode="numeric" value="' + esc(f.price) + '"></div>' +
+      '<div class="field"><label for="sp-cur">Currency</label><select id="sp-cur"><option value="coins"' + (f.currency === 'coins' ? ' selected' : '') + '>Coins</option><option value="gold"' + (f.currency === 'gold' ? ' selected' : '') + '>Gold Coins</option></select></div></div>' +
+      '<div class="two"><div class="field"><label for="sp-disc">Discount %</label><input id="sp-disc" type="number" min="0" max="95" step="1" inputmode="numeric" value="' + esc(f.discount) + '"><p class="hint">0 means no discount.</p></div>' +
+      '<div class="field"><label for="sp-stock">Stock (max 100)</label><input id="sp-stock" type="number" min="0" max="100" step="1" inputmode="numeric" placeholder="Empty = unlimited" value="' + esc(f.stock) + '"></div></div>' +
+      '<div class="field"><label>Logo / picture</label><div class="photo-actions"><span class="btn-ghost btn-sm file-btn">Attach image<input type="file" id="sp-file" accept="image/*" aria-label="Attach product image"></span>' + (f.image ? '<button type="button" class="btn-ghost btn-sm" data-act="prod-image-clear">Remove image</button>' : '') + '</div><p class="hint" id="sp-fileinfo">' + (st.prodBusy ? 'Uploading...' : f.image ? 'Image attached.' : 'PNG, JPG or WebP. It is shrunk to 512 px automatically.') + '</p></div>' +
+      '<div class="field"><label for="sp-ribbon">Ribbon text (optional, short)</label><input id="sp-ribbon" type="text" maxlength="24" placeholder="-10%, LIMITED EDITION!, SPECIAL!" value="' + esc(f.ribbon) + '"></div>' +
+      '<div class="field"><label>Ribbon color</label><div class="rgb-box">' + slider('r', 'R', rgb[0], '#E5484D') + slider('g', 'G', rgb[1], '#30A46C') + slider('b', 'B', rgb[2], '#3E63DD') +
+      '<div class="hexrow"><span class="swatch" id="sp-swatch" style="background:' + esc(f.color) + '"></span><input id="sp-hex" type="text" maxlength="7" spellcheck="false" aria-label="Ribbon color as 6 digit hex" value="' + esc(f.color) + '"></div></div></div>' +
+      '<div class="field"><label for="sp-hint">What must the buyer fill in when redeeming? (optional)</label><textarea id="sp-hint" rows="2" maxlength="300" placeholder="Example: your Minecraft username and the world name">' + esc(f.hint) + '</textarea><p class="hint">Shown to buyers. The Redeem Code form asks for it.</p></div>' +
+      '<label class="switch"><input type="checkbox" id="sp-avail"' + (f.available ? ' checked' : '') + '><span class="track"></span><span>Visible in the Exchange</span></label>' +
+      '<div class="photo-actions"><button type="submit" class="btn-primary"' + (st.prodBusy ? ' disabled' : '') + '>' + (f.id ? 'Save changes' : 'Add product') + '</button>' + (f.id ? '<button type="button" class="btn-ghost" data-act="prod-cancel">Cancel edit</button>' : '') + '</div></form>' +
+      '<div class="prod-preview"><p class="preview-title">Live preview</p><div id="prodPreview">' + shopCard(prodAsItem(f), { preview: true }) + '</div></div></div></div>';
+    var prods = S.adm.products || [];
+    var list = '<div class="panel"><h3>Products (' + prods.length + ')</h3>' + (prods.length ? '<div class="rows">' + prods.map(function (p) {
+      return '<div class="row prod-row" data-pid="' + esc(p.id) + '"><div class="prod-line">' + (p.image_url ? '<img class="prod-thumb" src="' + esc(p.image_url) + '" alt="">' : '<span class="prod-thumb prod-thumb-ph"></span>') + '<div><strong>' + esc(p.name) + '</strong><span class="muted">' + priceHtml(p) + ' &middot; ' + (p.stock == null ? 'unlimited stock' : p.stock + ' in stock') + ' &middot; ' + nf(p.sold) + ' sold &middot; ' + (p.available ? 'visible' : 'hidden') + (p.kind !== 'product' ? ' &middot; built-in' : '') + '</span></div></div>' +
+        '<div class="photo-actions"><button type="button" class="btn-ghost btn-sm" data-act="prod-edit">Edit</button><button type="button" class="btn-ghost btn-sm is-danger-text" data-act="prod-delete">Delete</button></div></div>';
+    }).join('') + '</div>' : '<p class="empty">No products yet. Add the first one above.</p>') + '</div>';
+    var ords = S.adm.orders || [];
+    var rec = '<div class="panel"><h3>Receipts and redeem requests</h3><p class="muted">Redeemed codes come first. Deliver them (for example by DM on Discord), then mark them Delivered.</p>' + (ords.length ? '<div class="rows">' + ords.map(function (o) {
+      return '<div class="row" data-oid="' + o.id + '"><div><strong>' + esc(o.item_name) + ' &middot; <span class="tnum">' + esc(o.code) + '</span></strong><span class="muted">Buyer ' + esc(o.buyer_name || '?') + (o.gifted_to_name ? ' &middot; gifted to ' + esc(o.gifted_to_name) : '') + ' &middot; holder ' + esc(o.holder_name || 'deleted') + ' &middot; ' + nf(o.price_paid) + ' ' + (o.currency === 'gold' ? 'Gold' : 'Coins') + ' &middot; ' + esc(XK.fmtStamp(Date.parse(o.created_at))) + '</span>' +
+        (o.redeem_username ? '<p class="pre"><b>Redeem for:</b> ' + esc(o.redeem_username) + (o.redeem_extra ? '\n' + esc(o.redeem_extra) : '') + '</p>' : '') + '</div>' +
+        '<div class="photo-actions"><span class="pill ' + (o.status === 'fulfilled' ? 'pill-ok' : '') + '">' + esc(RSTAT[o.status] || o.status) + '</span>' +
+        (o.status !== 'fulfilled' ? '<button type="button" class="btn-primary btn-sm" data-act="order-done">Mark delivered</button>' : '') +
+        '<button type="button" class="btn-ghost btn-sm is-danger-text" data-act="order-delete">Delete receipt</button></div></div>';
+    }).join('') + '</div>' : '<p class="empty">No receipts yet.</p>') + '</div>';
+    return form + list + rec;
+  }
   function adminStaff() {
     var ss = S.adm.sessions, t = XK.now();
     var pending = ss.filter(function (s) { return s.status === 'pending'; });
@@ -346,13 +434,13 @@
       }).join('') + '</div>' : '<p class="empty">No active admin sessions.</p>') + '</div>' +
       '<div class="panel"><h3>Staff</h3><div class="rows">' + staff.map(function (a) { return '<div class="row"><div><strong>' + esc(a.username) + '</strong><span class="muted">' + badgeFor(a) + '</span></div></div>'; }).join('') + '</div>' +
       '<p class="hint">Make or remove admins, or hand over leadership, from the Accounts tab.</p>' +
-      '<div><button type="button" class="btn-ghost btn-sm" data-act="admin-password">Change admin password</button></div></div>';
+      '<div class="photo-actions"><button type="button" class="btn-ghost btn-sm" data-act="admin-password">Change admin password</button><button type="button" class="btn-ghost btn-sm" data-act="beta-password">Change Webzombite beta password</button></div></div>';
   }
 
   /* ======================= render ======================= */
   function normalize() {
     var u = user(), items = navItems();
-    if (st.view === 'settings') { if (!u) st.view = null; }
+    if (st.view === 'settings' || st.view === 'inventory') { if (!u) st.view = null; }
     else if (items.indexOf(st.view) < 0) st.view = null;
     if (!st.view) st.view = u ? 'announcements' : 'home';
   }
@@ -367,6 +455,7 @@
     else if (v === 'exchange') html = viewExchange();
     else if (v === 'feedback') html = viewFeedback();
     else if (v === 'settings') html = viewSettings();
+    else if (v === 'inventory') html = viewInventory();
     else if (v === 'admin') html = viewAdmin();
     else html = viewFeed('announcement');
     viewEl.innerHTML = html;
@@ -383,7 +472,7 @@
     clearTimeout(rt);
     rt = setTimeout(function () {
       var a = document.activeElement;
-      if (a && viewEl.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && ['checkbox', 'file', 'range', 'radio'].indexOf(a.type) < 0) { scheduleRender(); return; }
+      if (a && viewEl.contains(a) && ((/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && ['checkbox', 'file', 'range', 'radio'].indexOf(a.type) < 0) || a.closest('#prodForm'))) { scheduleRender(); return; }
       render();
     }, 120);
   }
@@ -618,6 +707,116 @@
       .then(function (v) { if (v) guard(api.setStaff(u.id, make ? 'admin' : null), make ? 'Admin added.' : 'Admin removed.'); });
   };
 
+  /* ----- redeem, gift, receipts ----- */
+  function orderOf(t) { var id = t.closest('[data-oid]').getAttribute('data-oid'); return S.orders.filter(function (o) { return o.id === id; })[0]; }
+  ACTIONS.redeem = function (t) {
+    var u = user(); if (!u) { location.assign('login.html'); return; }
+    var code = t.getAttribute('data-code') || '', o = code ? S.orders.filter(function (x) { return x.code === code; })[0] : null;
+    var hint = o && o.shop_items && o.shop_items.redeem_hint ? o.shop_items.redeem_hint : 'If the product asks for details (see its description in the Exchange), write them here.';
+    XK.dialog({
+      title: 'Redeem Code', message: 'Type the 10-digit code from your receipt. Never share your code with anyone.',
+      fields: [
+        { name: 'code', label: 'Redeem code', value: code, required: true, placeholder: '0000000000', autocomplete: 'off' },
+        { name: 'username', label: 'Username', value: u.username, required: true, hint: 'The name the item should be delivered to (for example your Discord or Minecraft name).' },
+        { name: 'extra', label: 'Extra description', type: 'textarea', hint: hint }
+      ],
+      confirmLabel: 'Redeem',
+      onSubmit: function (v) { return api.redeem(v.code, v.username, v.extra); }
+    }).then(function (v) { if (v) { XK.toast('Code redeemed! Staff will deliver it soon.', 'ok'); render(); } });
+  };
+  ACTIONS.gift = function (t) {
+    var o = orderOf(t); if (!o) return;
+    XK.dialog({
+      title: 'Gift this receipt', message: 'The receipt moves to the other player. The buyer name stays the same and it shows "Gifted to" with their name. You cannot undo this.',
+      fields: [{ name: 'to', label: 'Their username', required: true }], confirmLabel: 'Gift',
+      onSubmit: function (v) { return api.gift(o.id, v.to.trim()); }
+    }).then(function (v) { if (v) { XK.toast('Receipt gifted.', 'ok'); render(); } });
+  };
+  ACTIONS['receipt-delete'] = function (t) {
+    var o = orderOf(t); if (!o) return;
+    XK.confirm('Remove this receipt?', o.status === 'pending' ? 'Its code has NOT been redeemed. Removing it destroys the code and you lose the item.' : 'It disappears from your inventory.', 'Remove', true)
+      .then(function (v) { if (v) guard(api.deleteMyReceipt(o.id), 'Receipt removed.'); });
+  };
+  ACTIONS['order-done'] = function (t) { guard(api.setOrderStatus(t.closest('[data-oid]').getAttribute('data-oid'), 'fulfilled'), 'Marked as delivered.'); };
+  ACTIONS['order-delete'] = function (t) {
+    var id = t.closest('[data-oid]').getAttribute('data-oid');
+    XK.confirm('Delete this receipt?', 'The player loses it from their inventory. This cannot be undone.', 'Delete receipt', true).then(function (v) { if (v) guard(api.deleteReceipt(id), 'Receipt deleted.'); });
+  };
+
+  /* ----- Webzombite beta gate ----- */
+  function openWebzombite() { location.assign(XK.CONFIG.webzombiteUrl); }
+  ACTIONS['wz-open'] = function () {
+    if (!user()) { location.assign('login.html'); return; }
+    if (S.beta) { openWebzombite(); return; }
+    XK.dialog({
+      title: 'Webzombite beta', message: 'Webzombite is Under Development. Enter the beta password to play.',
+      fields: [{ name: 'pw', label: 'Beta password', type: 'password', required: true, autocomplete: 'off' }], confirmLabel: 'Unlock',
+      onSubmit: function (v) { return api.betaUnlock(v.pw.trim()).then(function (ok) { if (!ok) throw new Error('Wrong password.'); }); }
+    }).then(function (v) { if (v) { XK.toast('Beta unlocked. Loading the game...', 'ok'); setTimeout(openWebzombite, 500); } });
+  };
+  ACTIONS['beta-password'] = function () {
+    XK.dialog({ title: 'Change Webzombite beta password', message: 'Everyone has to unlock the beta again with the new password. Use at least 8 characters.',
+      fields: [{ name: 'pw', label: 'New beta password', type: 'text', required: true, autocomplete: 'off' }], confirmLabel: 'Change password',
+      onSubmit: function (v) { return api.setBetaPassword(v.pw.trim()); } }).then(function (v) { if (v) XK.toast('Beta password changed.', 'ok'); });
+  };
+
+  /* ----- Shop Products Shows (staff) ----- */
+  ACTIONS['prod-edit'] = function (t) {
+    var id = t.closest('[data-pid]').getAttribute('data-pid'), p = (S.adm.products || []).filter(function (x) { return x.id === id; })[0]; if (!p) return;
+    st.prod = { id: p.id, name: p.name, desc: p.description || '', price: String(p.base_price || p.price), currency: p.currency, discount: p.discount_pct || 0, image: p.image_url || '',
+      ribbon: p.ribbon_text || '', color: p.ribbon_color || '#E3B02A', stock: p.stock == null ? '' : String(p.stock), hint: p.redeem_hint || '', available: !!p.available };
+    render(); window.scrollTo(0, 0);
+  };
+  ACTIONS['prod-cancel'] = function () { st.prod = newProd(); render(); };
+  ACTIONS['prod-image-clear'] = function () { st.prod.image = ''; render(); };
+  ACTIONS['prod-delete'] = function (t) {
+    var id = t.closest('[data-pid]').getAttribute('data-pid'), p = (S.adm.products || []).filter(function (x) { return x.id === id; })[0]; if (!p) return;
+    XK.confirm('Delete ' + p.name + '?', 'Players can no longer buy it. If it already has receipts it is only hidden, so those receipts keep working.', 'Delete product', true)
+      .then(function (v) { if (v) guard(api.deleteProduct(id), 'Product deleted.'); });
+  };
+  function refreshProdPreview() {
+    var pv = $('#prodPreview'); if (pv) pv.innerHTML = shopCard(prodAsItem(st.prod), { preview: true });
+  }
+  function setColor(hex, fromHex) {
+    st.prod.color = hex.toUpperCase();
+    var rgb = rgbOf(st.prod.color);
+    ['r', 'g', 'b'].forEach(function (k, i) { var s = $('#sp-' + k), o = $('#sp-' + k + 'o'); if (s) s.value = rgb[i]; if (o) o.textContent = rgb[i]; });
+    var sw = $('#sp-swatch'); if (sw) sw.style.background = st.prod.color;
+    var hx = $('#sp-hex'); if (hx && !fromHex) hx.value = st.prod.color;
+    refreshProdPreview();
+  }
+  function shrinkImage(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var m = 512, k = Math.min(1, m / Math.max(img.naturalWidth, img.naturalHeight)), w = Math.max(1, Math.round(img.naturalWidth * k)), h = Math.max(1, Math.round(img.naturalHeight * k));
+        var cv = document.createElement('canvas'); cv.width = w; cv.height = h; cv.getContext('2d').drawImage(img, 0, 0, w, h); URL.revokeObjectURL(url);
+        cv.toBlob(function (b) { if (!b) { reject(new Error('Could not prepare the image.')); return; }
+          if (b.size > 1000000) cv.toBlob(function (j) { j ? resolve({ blob: j, ext: 'jpg' }) : reject(new Error('Image is too large.')); }, 'image/jpeg', 0.85);
+          else resolve({ blob: b, ext: 'png' }); }, 'image/png');
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('That file could not be read as an image.')); };
+      img.src = url;
+    });
+  }
+  document.addEventListener('change', function (e) {
+    var t = e.target; if (!t || !t.id || t.id.indexOf('sp-') !== 0) return;
+    if (t.id === 'sp-file') {
+      var file = t.files && t.files[0]; if (!file) return;
+      if (!/^image\//.test(file.type)) { XK.toast('Choose an image file.', 'error'); return; }
+      st.prodBusy = true; render();
+      shrinkImage(file).then(function (r) { return api.uploadProductImage(r.blob, r.ext); }).then(function (url) { st.prod.image = url; XK.toast('Image attached.', 'ok'); }, fail).then(function () { st.prodBusy = false; render(); });
+    } else if (t.id === 'sp-avail') st.prod.available = t.checked;
+    else if (t.id === 'sp-cur') { st.prod.currency = t.value; refreshProdPreview(); }
+  });
+  document.addEventListener('input', function (e) {
+    var t = e.target, id = t.id; if (!id || id.indexOf('sp-') !== 0) return;
+    var map = { 'sp-name': 'name', 'sp-desc': 'desc', 'sp-price': 'price', 'sp-disc': 'discount', 'sp-stock': 'stock', 'sp-ribbon': 'ribbon', 'sp-hint': 'hint' };
+    if (map[id]) { st.prod[map[id]] = t.value; refreshProdPreview(); }
+    else if (id === 'sp-r' || id === 'sp-g' || id === 'sp-b') setColor('#' + hex2($('#sp-r').value) + hex2($('#sp-g').value) + hex2($('#sp-b').value));
+    else if (id === 'sp-hex') { var v = t.value.trim(); if (v.charAt(0) !== '#') v = '#' + v; if (/^#[0-9a-f]{6}$/i.test(v)) setColor(v, true); }
+  });
+
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-act]'); if (!t || !viewEl.contains(t) && !navEl.contains(t) && !acctEl.contains(t)) return;
     var h = ACTIONS[t.getAttribute('data-act')];
@@ -668,6 +867,18 @@
         if (!body) throw new Error('Write the message.');
         if (p.type === 'event' && link && !/^https?:\/\/\S+$/i.test(link)) throw new Error('The event link must start with http:// or https://');
         run(api.addPost({ type: p.type, title: title, body: body, link: p.type === 'event' ? link : '', when: p.type === 'event' ? p.when.trim() : '' }), 'Posted.', function () { st.postForm = { type: p.type, title: '', body: '', link: '', when: '' }; });
+      } else if (f === 'product') {
+        var pr = st.prod, price = parseInt(pr.price, 10), disc = parseInt(pr.discount, 10) || 0, stock = String(pr.stock).trim() === '' ? null : parseInt(pr.stock, 10);
+        if (!pr.name.trim()) throw new Error('Add a title.');
+        if (isNaN(price) || price < 1) throw new Error('Set a price of 1 or more.');
+        if (disc < 0 || disc > 95) throw new Error('The discount must be 0 to 95.');
+        if (stock !== null && (isNaN(stock) || stock < 0 || stock > 100)) throw new Error('Stock must be empty or 0 to 100.');
+        if (!/^#[0-9a-f]{6}$/i.test(pr.color)) throw new Error('The ribbon color must be 6 hex digits like #E3B02A.');
+        if (btn) btn.disabled = true;
+        api.saveProduct({ id: pr.id, name: pr.name.trim(), desc: pr.desc.trim(), price: price, currency: pr.currency, discount: disc, image: pr.image, ribbon: pr.ribbon.trim(),
+          ribbonColor: pr.color.toUpperCase(), stock: stock, hint: pr.hint.trim(), available: pr.available }).then(function () {
+          XK.toast(pr.id ? 'Product saved.' : 'Product added.', 'ok'); st.prod = newProd(); render();
+        }, function (er) { if (btn) btn.disabled = false; fail(er); });
       } else if (f === 'report') {
         var r = st.reportForm, rl = r.link.trim();
         if (!r.title.trim()) throw new Error('Add a title.');

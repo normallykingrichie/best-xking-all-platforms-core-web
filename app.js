@@ -9,6 +9,7 @@
   var CONFIG = {
     linktreeUrl: C.linktreeUrl || 'https://xking-supremax-studios-linktree.netlify.app/',
     quizRewards: [10, 7, 5],
+    webzombiteUrl: C.webzombiteUrl || 'webzombite/',
     pollMs: 6000
   };
   var K = { theme: 'xk1.theme', remember: 'xk.remember', adminMode: 'xk.adminMode' };
@@ -114,10 +115,10 @@
 
   /* ======================= state ======================= */
   var S = {
-    ready: false, session: null, user: null, me: null, identities: [],
+    ready: false, beta: false, session: null, user: null, me: null, identities: [],
     posts: [], shop: [], quiz: null, orders: [], ledger: [], myReports: [],
     adminActive: false, adminMode: sGet(K.adminMode) === '1',
-    adm: { accounts: [], audit: [], reports: [], sessions: [], loaded: false }
+    adm: { accounts: [], audit: [], reports: [], sessions: [], products: [], orders: [], loaded: false }
   };
 
   function normAvatar(u) { return typeof u === 'string' && /^https:\/\//.test(u) ? u : null; }
@@ -136,6 +137,8 @@
     return sb.from('profiles').select('*').eq('id', S.user.id).maybeSingle().then(function (r) {
       if (r.error) throw r.error;
       S.me = r.data ? normMe(r.data) : null;
+    }).then(function () {
+      return S.me ? sb.rpc('beta_check').then(function (b) { S.beta = !b.error && b.data === true; }, function () { S.beta = false; }) : (S.beta = false);
     }).then(function () {
       return sb.auth.getUserIdentities().then(function (r) { S.identities = (r.data && r.data.identities) || []; }, function () { S.identities = S.user.identities || []; });
     });
@@ -159,7 +162,7 @@
   }
 
   function loadShop() {
-    return sb.from('shop_items').select('*').eq('available', true).order('sort', { ascending: true }).then(function (r) {
+    return sb.from('shop_items').select('*').eq('available', true).eq('archived', false).order('sort', { ascending: true }).then(function (r) {
       if (r.error) throw r.error; S.shop = r.data;
     });
   }
@@ -214,7 +217,7 @@
   function loadWallet() {
     if (!S.me) { S.orders = []; S.ledger = []; S.myReports = []; return Promise.resolve(); }
     return Promise.all([
-      sb.from('purchase_orders').select('id,item_id,status,created_at,shop_items(name)').order('created_at', { ascending: false }).limit(50),
+      sb.from('purchase_orders').select('id,item_id,status,created_at,code,buyer_name,gifted_to_name,price_paid,currency,redeem_username,redeem_extra,shop_items(name,image_url,redeem_hint)').order('created_at', { ascending: false }).limit(50),
       sb.from('ledger').select('id,currency,delta,reason,created_at').order('created_at', { ascending: false }).limit(15),
       sb.from('reports').select('id,kind,title,status,created_at').order('created_at', { ascending: false }).limit(20)
     ]).then(function (r) {
@@ -241,7 +244,9 @@
       sb.rpc('admin_list_accounts'),
       sb.from('audit_log').select('id,actor,action,target,detail,created_at').order('created_at', { ascending: false }).limit(60),
       sb.from('reports').select('*').order('created_at', { ascending: false }).limit(100),
-      leader ? sb.from('admin_sessions').select('*').order('requested_at', { ascending: false }).limit(40) : Promise.resolve({ data: [] })
+      leader ? sb.from('admin_sessions').select('*').order('requested_at', { ascending: false }).limit(40) : Promise.resolve({ data: [] }),
+      sb.from('shop_items').select('*').eq('archived', false).order('sort', { ascending: true }),
+      sb.rpc('admin_list_orders')
     ]).then(function (r) {
       var a = S.adm;
       a.accounts = r[0].error ? [] : (r[0].data || []);
@@ -250,6 +255,8 @@
       a.audit = r[1].error ? [] : r[1].data.map(function (x) { return { id: x.id, ts: Date.parse(x.created_at), action: x.action, target: x.target, detail: x.detail, actor: names[x.actor] || '' }; });
       a.reports = r[2].error ? [] : r[2].data.map(function (x) { return { id: x.id, kind: x.kind, title: x.title, details: x.details, link: x.external_link, status: x.status, ts: Date.parse(x.created_at), who: names[x.user_id] || 'Deleted user' }; });
       a.sessions = (r[3].data || []).map(function (x) { return { id: x.id, who: names[x.user_id] || 'Unknown', status: x.status, requestedAt: Date.parse(x.requested_at), expiresAt: x.expires_at ? Date.parse(x.expires_at) : 0 }; });
+      a.products = r[4].error ? [] : (r[4].data || []);
+      a.orders = r[5].error ? [] : (r[5].data || []);
       a.loaded = true;
     });
   }
@@ -280,7 +287,7 @@
     try {
       if (channel) { sb.removeChannel(channel); channel = null; }
       var ch = sb.channel('xk-live');
-      ['posts', 'quizzes', 'quiz_answers', 'profiles', 'admin_sessions'].forEach(function (t) {
+      ['posts', 'quizzes', 'quiz_answers', 'profiles', 'admin_sessions', 'shop_items'].forEach(function (t) {
         ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, function () {
           clearTimeout(rtTimer); rtTimer = setTimeout(function () { refresh().catch(swallow('live refresh')); }, 250);
         });
@@ -354,6 +361,24 @@
     },
     answer: function (quizId, text) { return rpc('submit_answer', { p_quiz: quizId, p_answer: text }).then(function (r) { return loadQuiz().then(function () { emit('data'); return r; }); }); },
     buy: function (id) { return rpc('purchase_item', { p_item: id }).then(refresh); },
+    redeem: function (code, name, extra) { return rpc('redeem_code', { p_code: code, p_username: name, p_extra: extra || '' }).then(function (r) { return refresh().then(function () { return r; }); }); },
+    gift: function (orderId, username) { return rpc('gift_receipt', { p_order: orderId, p_username: username }).then(refresh); },
+    betaUnlock: function (pw) { return rpc('beta_unlock', { p_password: pw }).then(function (ok) { if (ok) S.beta = true; emit('data'); return ok === true; }); },
+    setBetaPassword: function (pw) { return rpc('set_beta_password', { p_new: pw }).then(refresh); },
+    saveProduct: function (o) {
+      return rpc('admin_save_product', { p_id: o.id || null, p_name: o.name, p_desc: o.desc, p_price: o.price, p_currency: o.currency, p_discount: o.discount, p_image: o.image || null,
+        p_ribbon: o.ribbon, p_ribbon_color: o.ribbonColor, p_stock: o.stock, p_hint: o.hint, p_available: o.available }).then(function (id) { return refresh().then(function () { return id; }); });
+    },
+    deleteProduct: function (id) { return rpc('admin_delete_product', { p_id: id }).then(refresh); },
+    setOrderStatus: function (id, s) { return rpc('admin_set_order_status', { p_id: id, p_status: s }).then(refresh); },
+    deleteReceipt: function (id) { return rpc('admin_delete_receipt', { p_id: id }).then(refresh); },
+    deleteMyReceipt: function (id) { return rpc('delete_receipt', { p_order: id }).then(refresh); },
+    uploadProductImage: function (blob, ext) {
+      var path = 'p-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + '.' + ext;
+      return sb.storage.from('products').upload(path, blob, { contentType: blob.type || 'image/png', cacheControl: '31536000', upsert: false }).then(must).then(function () {
+        return sb.storage.from('products').getPublicUrl(path).data.publicUrl;
+      });
+    },
     sendReport: function (o) {
       return sb.from('reports').insert({ kind: o.kind, title: o.title, details: o.details, external_link: o.link || null }).then(must).then(loadWallet).then(function () { emit('data'); });
     },
