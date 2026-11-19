@@ -4,5 +4,6 @@
 window.XK_CONFIG = {
   supabaseUrl: 'https://wjwzwuxklszojemvtplj.supabase.co',
   supabaseKey: 'sb_publishable_S9c8P9FaWEcjU6yNkO8OEg_aNoXym3k',
+  webzombiteUrl: 'https://webzombite-xking.louisstevenhrt05.workers.dev/',
   linktreeUrl: 'https://xking-supremax-studios-linktree.netlify.app/'
 };

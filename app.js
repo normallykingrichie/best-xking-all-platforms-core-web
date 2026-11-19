@@ -9,7 +9,7 @@
   var CONFIG = {
     linktreeUrl: C.linktreeUrl || 'https://xking-supremax-studios-linktree.netlify.app/',
     quizRewards: [10, 7, 5],
-    webzombiteUrl: C.webzombiteUrl || 'webzombite/',
+    webzombiteUrl: C.webzombiteUrl || 'https://webzombite-xking.louisstevenhrt05.workers.dev/',
     pollMs: 6000
   };
   var K = { theme: 'xk1.theme', remember: 'xk.remember', adminMode: 'xk.adminMode' };
